@@ -13,8 +13,8 @@
  */
 import { LikeC4ModelProvider, ReactLikeC4, type DiagramApi } from '@likec4/diagram'
 import type { LikeC4Model } from '@likec4/core/model'
-import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react'
-import { fitBox, interpolateZoom, parentView, viewChain } from './logic.mjs'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
+import { fitBox, interpolateZoom, legibleFlags, legibleFrame, parentView, viewChain } from './logic.mjs'
 import { FADE_MS, ZOOM_MS, easeInOutCubic, factor, patchCamera, reducedMotion } from './motion'
 
 type Box = { x: number; y: number; width: number; height: number }
@@ -33,6 +33,8 @@ export type StageHandle = {
   chain: (view: string) => string[]
   /** resolves once the first layer is initialised */
   ready: () => Promise<void>
+  /** ease the active layer's camera to its (legible) framing */
+  frame: (ms?: number) => void
 }
 
 type Props = {
@@ -49,6 +51,9 @@ type Props = {
   onCanvasClick?: () => void
   onNodeContextMenu?: (node: any, e: MouseEvent) => void
   onSettled?: (view: string) => void
+  /** present / record: bigger titles + edge labels, hide text that would render illegibly, and
+   *  frame the densest window when the whole view can't be shown legibly */
+  legible?: boolean
 }
 
 const PAD_DEFAULT = 56
@@ -78,7 +83,7 @@ function animate(ms: number, frame: (t: number) => void, reverse = false) {
 }
 
 export const Stage = forwardRef<StageHandle, Props>(function Stage(
-  { model, data, initialView, scheme, themeCss, tour = [], pad = PAD_DEFAULT, layerProps, onNodeClick, onNavigateTo, onCanvasClick, onNodeContextMenu, onSettled },
+  { model, data, initialView, scheme, themeCss, tour = [], pad = PAD_DEFAULT, layerProps, onNodeClick, onNavigateTo, onCanvasClick, onNodeContextMenu, onSettled, legible },
   ref,
 ) {
   const views = useMemo(() => {
@@ -86,6 +91,15 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
     for (const v of model.views()) m.set(v.id, v.$layouted)
     return m
   }, [model])
+
+  const stageSize = () => ({ width: stage.current?.clientWidth ?? 0, height: stage.current?.clientHeight ?? 0 })
+  /** the box to fit for a view: the whole view, or (legible) its densest legible window */
+  const frameOf = (viewId: string): Box => {
+    const v = views.get(viewId)
+    return legible ? (legibleFrame(v, stageSize(), pad) as any).box : v.bounds
+  }
+  const kOf = (viewId: string) => (legible ? (legibleFrame(views.get(viewId), stageSize(), pad) as any).k : 1)
+  const keOf = (viewId: string) => (legible ? (legibleFrame(views.get(viewId), stageSize(), pad) as any).ke : 1)
 
   // hierarchy: the view holding a node that drills into it → a tour `via` → the scope parent
   const parentOf = useCallback(
@@ -174,9 +188,10 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
       elB.style.zIndex = kind === 'out' ? '1' : '2'
       elA.style.zIndex = kind === 'out' ? '2' : '1'
       document.documentElement.dataset.atlasTransition = kind
+      elA.style.willChange = elB.style.willChange = 'opacity' // composited only while fading
 
       if (kind === 'fade') {
-        const vpB = fitBox(views.get(target).bounds, full, pad)
+        const vpB = fitBox(frameOf(target), full, pad)
         await animate(still ? 160 : FADE_MS * factor(), (t) => {
           if (!still) B.xyflow.setViewport({ ...vpB, zoom: vpB.zoom * lerp(0.94, 1, t), x: lerp(W / 2 - (W / 2 - vpB.x) * 0.94, vpB.x, t), y: lerp(H / 2 - (H / 2 - vpB.y) * 0.94, vpB.y, t) })
           elA.style.opacity = String(1 - t)
@@ -188,8 +203,8 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
         const parentId = kind === 'in' ? srcView : target
         const childId = kind === 'in' ? target : srcView
         const node = views.get(parentId).nodes.find((n: any) => n.id === portal) as Box
-        const childBounds = views.get(childId).bounds as Box
-        const vpP0 = kind === 'in' ? A.xyflow.getViewport() : fitBox(views.get(parentId).bounds, full, pad)
+        const childBounds = frameOf(childId)
+        const vpP0 = kind === 'in' ? A.xyflow.getViewport() : fitBox(frameOf(parentId), full, pad)
         const vpP1 = fitBox(node, full, Math.min(W, H) * 0.03, 12)
         const zi = interpolateZoom(1.0)(toView(vpP0, W, H), toView(vpP1, W, H))
         const frame = (t: number) => {
@@ -208,6 +223,7 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
       }
 
       elB.style.opacity = '1'
+      elA.style.willChange = elB.style.willChange = '' // at rest: no layer hint → text re-rasters crisp
       delete document.documentElement.dataset.atlasTransition
       // sync the ref now: multi-hop jumps call transition() again before React re-renders
       st.current = { active: toKey, layers: [{ key: toKey, viewId: target }] }
@@ -251,9 +267,49 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
       parentOf,
       chain,
       ready: () => firstReady.current.promise,
+      frame: (ms = 450) => {
+        const h = handles.current.get(st.current.active)
+        if (!h?.xyflow) return
+        const vp = fitBox(frameOf(currentView()), { x: 0, y: 0, ...stageSize() } as Box, pad)
+        void h.xyflow.setViewport(vp, ms ? { duration: ms } : undefined)
+      },
     }),
-    [goNow, parentOf, chain, onSettled],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [goNow, parentOf, chain, onSettled, legible, views, pad],
   )
+
+  // legible: per-layer text scale k + flags that follow the live zoom (4 Hz, only while shown)
+  const [flags, setFlags] = useState<{ hideDesc: boolean; hideEdgeLabels: boolean }>({ hideDesc: false, hideEdgeLabels: false })
+  useEffect(() => {
+    if (!legible) return
+    const id = window.setInterval(() => {
+      const h = handles.current.get(st.current.active)
+      const z = h?.xyflow?.getViewport?.().zoom
+      if (!z) return
+      const f = legibleFlags(keOf(currentView()), z) as any
+      setFlags((p) => (p.hideDesc === f.hideDesc && p.hideEdgeLabels === f.hideEdgeLabels ? p : f))
+    }, 250)
+    return () => window.clearInterval(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [legible, views])
+  const legibleCss = legible
+    ? [
+        '.likec4-shadow-root{' +
+          [['xs', 13.33], ['sm', 16], ['md', 19.2], ['lg', 23.04], ['xl', 27.65]].map(([n, px]) => `--font-sizes-likec4-${n}:calc(${px}px * var(--atlas-k,1)) !important`).join(';') +
+          '}',
+        // descriptions / technology keep their original size (the boxes were laid out for it)
+        '.likec4-element-node-data [data-likec4-node-description]{font-size:calc(var(--likec4-text-size) * .74 / var(--atlas-k,1)) !important}',
+        '.likec4-element-node-data [data-likec4-node-technology]{font-size:calc(var(--likec4-text-size) * .635 / var(--atlas-k,1)) !important}',
+        '.likec4-edge-label .likec4-edge-label__text{font-size:calc(14px * var(--atlas-ke,1)) !important;white-space:nowrap !important;overflow-wrap:normal !important}',
+        '.likec4-edge-label{max-width:none !important;width:max-content !important}',
+        '.likec4-compound-node .likec4-compound-title{font-size:calc(15px * var(--atlas-k,1)) !important}',
+        flags.hideDesc ? '.likec4-element-node-data [data-likec4-node-description],.likec4-element-node-data [data-likec4-node-technology]{display:none !important}' : '',
+        flags.hideEdgeLabels ? '.likec4-edge-label-container{visibility:hidden !important}' : '',
+      ].join('\n')
+    : ''
+  // an edge label's will-change:transform freezes its raster at the scale it was first painted
+  // at → blurry after any zoom; let it re-raster with the viewport
+  const crispCss = '.likec4-edge-label-container{will-change:auto !important}'
 
   const fontVar = { '--likec4-app-font': 'var(--pl-font-sans)' } as any
   return (
@@ -270,7 +326,7 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
               if (h) h.el = el
               else if (el) handles.current.set(l.key, { el } as any)
             }}
-            style={{ opacity: l.key === active ? 1 : 0, pointerEvents: l.key === active ? 'auto' : 'none' }}
+            style={{ opacity: l.key === active ? 1 : 0, pointerEvents: l.key === active ? 'auto' : 'none', ...(legible ? ({ '--atlas-k': kOf(l.viewId), '--atlas-ke': keOf(l.viewId) } as any) : {}) }}
           >
             <ReactLikeC4
               {...layerProps}
@@ -288,11 +344,16 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
                 const h = handles.current.get(l.key) ?? ({} as LayerHandle)
                 handles.current.set(l.key, { ...h, diagram, xyflow })
                 patchCamera(diagram)
+                if (legible && l.key === 0) {
+                  // the first layer: LikeC4 fitted the WHOLE view; frame it legibly instead
+                  const vp = fitBox(frameOf(l.viewId), { x: 0, y: 0, ...stageSize() } as Box, pad)
+                  void xyflow.setViewport(vp)
+                }
                 readyOf(l.key).resolve()
                 firstReady.current.resolve()
               }}
             >
-              <style>{themeCss}</style>
+              <style>{themeCss + '\n' + crispCss + (legibleCss ? '\n' + legibleCss : '')}</style>
             </ReactLikeC4>
           </div>
         ))}

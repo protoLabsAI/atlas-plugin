@@ -75,3 +75,33 @@ test('toursFor always offers the auto tour, even next to file tours', () => {
   const ids = toursFor({ tours: [{ id: 'mine', slides: [{ view: 'inside' }] }] }, { elements: {}, views: { index: { id: 'index', _type: 'element', nodes: [] }, inside: view } }).map((t) => t.id)
   assert.deepEqual(ids, ['mine', 'auto'])
 })
+
+import { legibleFrame, legibleFlags, LEGIBLE } from '../src/logic.mjs'
+
+test('legibleFrame: scale text first, then crop to the densest window', () => {
+  const stage = { width: 1150, height: 712 }
+  const small = { bounds: { x: 0, y: 0, width: 800, height: 500 }, nodes: [] }
+  assert.deepEqual(legibleFrame(small, stage, 56).cropped, false)
+  assert.equal(legibleFrame(small, stage, 56).k, 1, 'already legible → untouched')
+  const mid = { bounds: { x: 0, y: 0, width: 2200, height: 1200 }, nodes: [] } // zFit ≈ 0.47
+  const m = legibleFrame(mid, stage, 56)
+  assert.ok(m.k > 1 && m.k <= LEGIBLE.kMax && !m.cropped)
+  assert.ok(19.2 * m.k * m.zoom >= 12 - 1e-6)
+  assert.ok(14 * m.ke * m.zoom >= 9 - 1e-6, 'edge labels reach 9 px')
+  // a wide flow: 10 nodes in a row, plus 3 stacked near x = 3000 (the densest region)
+  const nodes = [...Array(10)].map((_, i) => ({ id: `n${i}`, x: i * 600, y: 0, width: 320, height: 180 }))
+  nodes.push(...[1, 2, 3].map((j) => ({ id: `d${j}`, x: 3000, y: j * 250, width: 320, height: 180 })))
+  const wide = { bounds: { x: 0, y: 0, width: 5720, height: 930 }, nodes }
+  const w = legibleFrame(wide, stage, 56)
+  assert.ok(w.cropped && 19.2 * w.k * w.zoom >= 11.99, JSON.stringify(w))
+  assert.ok(w.box.x >= 0 && w.box.x + w.box.width <= 5720 + 1e-6)
+  assert.ok(w.box.x <= 3000 && w.box.x + w.box.width >= 3320, 'the densest column is in frame')
+  // the window is taller than the view → centred vertically on it, not pushed off one edge
+  assert.ok(Math.abs(w.box.y + w.box.height / 2 - 465) < 1, JSON.stringify(w.box))
+})
+
+test('legibleFlags', () => {
+  assert.deepEqual(legibleFlags(1.6, 0.4), { hideDesc: true, hideEdgeLabels: false }) // 14 × 1.6 × .4 = 8.96 ≈ 9
+  assert.deepEqual(legibleFlags(1, 0.4), { hideDesc: true, hideEdgeLabels: true })
+  assert.deepEqual(legibleFlags(1.6, 0.9), { hideDesc: false, hideEdgeLabels: false })
+})

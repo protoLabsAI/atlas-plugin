@@ -737,3 +737,55 @@ export function exploreShowPlan(req) {
   if (req?.step) return { step: req.step, highlight, fit: false }
   return { step: undefined, highlight, fit: !highlight }
 }
+
+// ---------------------------------------------------------------- legibility (present / record)
+// LikeC4's base sizes (styles: --font-sizes-likec4-md, description × .74, edge label 14px)
+export const LIKEC4_TITLE_PX = 19.2
+export const LIKEC4_DESC_RATIO = 0.74
+export const LIKEC4_EDGE_PX = 14
+export const LEGIBLE = { title: 12, desc: 9, edge: 9, kMax: 1.6, keMax: 2 }
+
+/**
+ * How to frame a view so its text stays legible on screen (CSS px), for present / record:
+ * `k` scales titles / compound titles / edge labels inside their (fixed) boxes, up to `kMax`;
+ * when even that leaves titles under `title` px at the whole-view fit, the camera frames the
+ * densest window at the minimum legible zoom instead of the whole view (present/record only).
+ * → {k, zoom, box (flow coords to fit), cropped}
+ */
+export function legibleFrame(view, stage, pad = 56, t = LEGIBLE) {
+  const b = view?.bounds
+  if (!b || !(b.width > 0) || !(stage.width > 0)) return { k: 1, ke: 1, zoom: 1, box: b, cropped: false }
+  const avail = { w: Math.max(1, stage.width - 2 * pad), h: Math.max(1, stage.height - 2 * pad) }
+  const zFit = Math.min(avail.w / b.width, avail.h / b.height)
+  const k = Math.min(t.kMax, Math.max(1, t.title / (LIKEC4_TITLE_PX * zFit)))
+  const zMin = t.title / (LIKEC4_TITLE_PX * k)
+  // edge labels get their own scale (they sit on the lines, not in fixed boxes)
+  const keFor = (z) => Math.min(t.keMax, Math.max(1, t.edge / (LIKEC4_EDGE_PX * z)))
+  if (zFit >= zMin - 1e-6) return { k, ke: keFor(zFit), zoom: zFit, box: b, cropped: false }
+  // the densest window of the size that zMin can show, centred on a node, clamped into the view
+  const ww = avail.w / zMin
+  const wh = avail.h / zMin
+  const leaves = (view.nodes ?? []).filter((n) => !(n.children?.length) && n.width > 0)
+  const centres = leaves.map((n) => [n.x + n.width / 2, n.y + n.height / 2])
+  // inside the view along an axis it overflows; centred on the view along an axis it fits
+  const clampX = (x) => (ww >= b.width ? b.x + (b.width - ww) / 2 : Math.min(Math.max(x, b.x), b.x + b.width - ww))
+  const clampY = (y) => (wh >= b.height ? b.y + (b.height - wh) / 2 : Math.min(Math.max(y, b.y), b.y + b.height - wh))
+  const mid = [b.x + b.width / 2, b.y + b.height / 2]
+  let best = null
+  for (const [cx, cy] of centres.length ? centres : [mid]) {
+    const x = clampX(cx - ww / 2)
+    const y = clampY(cy - wh / 2)
+    const count = centres.filter(([px, py]) => px >= x && px <= x + ww && py >= y && py <= y + wh).length
+    const dist = Math.hypot(x + ww / 2 - mid[0], y + wh / 2 - mid[1])
+    if (!best || count > best.count || (count === best.count && dist < best.dist)) best = { x, y, count, dist }
+  }
+  return { k, ke: keFor(zMin), zoom: zMin, box: { x: best.x, y: best.y, width: ww, height: wh }, cropped: true }
+}
+
+/** Per-zoom text flags (present / record): hide what would render below the target. */
+export function legibleFlags(ke, zoom, t = LEGIBLE) {
+  return {
+    hideDesc: LIKEC4_TITLE_PX * LIKEC4_DESC_RATIO * zoom < t.desc - 0.05,
+    hideEdgeLabels: LIKEC4_EDGE_PX * ke * zoom < t.edge - 0.05,
+  }
+}

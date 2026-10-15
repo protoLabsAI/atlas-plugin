@@ -118,7 +118,7 @@ code.coderef:hover { text-decoration-color: var(--a-accent) }
 .present-mode { position: relative }
 .presenter { position: relative; height: 100% }
 .stage { position: absolute; inset: 0 }
-.layer { position: absolute; inset: 0; will-change: opacity }
+.layer { position: absolute; inset: 0 }
 .p-crumbs { position: absolute; top: 14px; left: 18px; display: flex; gap: 6px; align-items: center; font-size: 13px; color: var(--a-muted); z-index: 10; pointer-events: none }
 .p-crumbs span + span::before { content: '›'; margin-right: 6px; opacity: .6 }
 .p-crumbs .here { color: var(--pl-color-fg, #ededed); font-weight: 600 }
@@ -132,7 +132,6 @@ code.coderef:hover { text-decoration-color: var(--a-accent) }
 .notes-head { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--a-muted) }
 .notes-body { font-size: 15px; margin: 4px 0 6px } .notes-body p { margin: 4px 0 }
 .notes .keys { font-size: 11px; color: var(--a-muted); opacity: .8 }
-@media (prefers-reduced-motion: reduce) { .layer { will-change: auto } }
 @media (max-width: 640px) {
   .details { position: absolute; inset: 0 0 0 auto; width: 100%; max-width: none; z-index: 15 }
   .search input { width: 14ch } .viewpick { max-width: 16ch } .crumb button { max-width: 14ch }

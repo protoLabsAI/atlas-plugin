@@ -100,7 +100,7 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
       setFocused(many[0])
     } else if (sameView) {
       d.send({ type: 'key.esc' } as any)
-      d.fitDiagram(450)
+      stage.current?.frame(450)
       setFocused(null)
     }
   }, [data])
@@ -210,13 +210,13 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
         const d = stage.current?.diagram()
         if ((d?.getContext() as any)?.activeWalkthrough) {
           d!.stopWalkthrough()
-          d!.fitDiagram(450)
+          stage.current?.frame(450)
           setWalkNow(0)
           return
         }
         if (st.current.focused) {
           d?.send({ type: 'key.esc' } as any)
-          d?.fitDiagram(450)
+          stage.current?.frame(450)
           setFocused(null)
           return
         }
@@ -235,7 +235,7 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
     if (!d) return
     if (n === 0) {
       d.stopWalkthrough()
-      d.fitDiagram(450)
+      stage.current?.frame(450)
     } else if ((d.getContext() as any).activeWalkthrough) d.walkthroughStep({ step: stepId(n) })
     else d.startWalkthrough(stepId(n))
     setWalkNow(n)
@@ -380,6 +380,7 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
         tour={tour}
         pad={PAD}
         layerProps={LAYER_PROPS}
+        legible
         onNavigateTo={(_to, el) => el && drill(el.id)}
         onNodeClick={(n) => setFocused(n.id)}
         onSettled={(v) => setView(v)}
