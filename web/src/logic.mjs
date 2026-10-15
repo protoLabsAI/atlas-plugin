@@ -119,6 +119,12 @@ export function tourArray(tours) {
   return []
 }
 
+/** A title safe to show + match as a menu item name: control chars, NEL and the Unicode
+ *  line / paragraph separators become spaces (record.py's clean_title does the same). */
+export function cleanTitle(t) {
+  return String(t ?? '').replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, ' ').replace(/\s+/g, ' ').trim() || 'Tour'
+}
+
 /** Validate API tours against the model: drops unknown views, bad steps, unknown focus. */
 export function cleanTours(tours, data) {
   const out = []
@@ -132,9 +138,10 @@ export function cleanTours(tours, data) {
       if (Number.isInteger(s.step) && s.step >= 1 && s.step <= dynamicSteps(v).length) slide.step = s.step
       if (typeof s.focus === 'string' && v.nodes?.some((n) => n.id === s.focus)) slide.focus = s.focus
       if (typeof s.via === 'string') slide.via = s.via
+      if (Number.isInteger(s.hold_ms) && s.hold_ms >= 500 && s.hold_ms <= 60000) slide.hold_ms = s.hold_ms
       slides.push(slide)
     }
-    if (slides.length) out.push({ id: String(t.id ?? `tour${out.length + 1}`), title: String(t.title ?? t.id ?? 'Tour'), slides })
+    if (slides.length) out.push({ id: String(t.id ?? `tour${out.length + 1}`), title: cleanTitle(t.title ?? t.id ?? 'Tour'), slides })
   }
   return out
 }

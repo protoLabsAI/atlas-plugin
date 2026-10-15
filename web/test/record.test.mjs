@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { slideDwellMs, stepDwellMs, words, parseDeepLink, FINAL_HOLD_MS } from '../src/logic.mjs'
+import { slideDwellMs, stepDwellMs, words, parseDeepLink, FINAL_HOLD_MS, toursFor, cleanTitle } from '../src/logic.mjs'
 
 test('dwell model (pinned to record.py — see tests/test_record.py)', () => {
   assert.equal(words('The **graph** owns `the` loop.'), 5)
@@ -20,4 +20,16 @@ test('parseDeepLink', () => {
   assert.equal(parseDeepLink(''), null)
   assert.equal(parseDeepLink('#section-2'), null, 'a plain anchor is not a deep link')
   assert.equal(parseDeepLink('#tour=auto&record=1').autoplay, true, 'record implies autoplay + present')
+})
+
+test('hold_ms survives toursFor (validated 500–60000) — the viewer dwells what record.py plans', () => {
+  const data = { elements: {}, views: { index: { id: 'index', _type: 'element', nodes: [] } } }
+  const [t] = toursFor({ tours: [{ id: 't', slides: [{ view: 'index', hold_ms: 20000 }, { view: 'index', hold_ms: 5 }, { view: 'index', hold_ms: '9000' }] }] }, data)
+  assert.deepEqual(t.slides.map((s) => s.hold_ms), [20000, undefined, undefined])
+  assert.equal(slideDwellMs(t.slides[0]), 20000)
+})
+
+test('cleanTitle (menu names the recorder matches exactly)', () => {
+  assert.equal(cleanTitle('A\u2028walk\u0085 \n through'), 'A walk through')
+  assert.equal(cleanTitle(''), 'Tour')
 })

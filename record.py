@@ -32,6 +32,8 @@ VIEW_CHANGE_MS = 1500
 SAME_VIEW_MS = 900
 SPEED = {"slow": 1.6, "normal": 1.0, "fast": 0.6}
 MAX_WAIT_MS = 180_000  # Campaign's per-step ceiling
+TAIL_MARGIN_MS = 20_000  # slack on each wait for camera drift / a slow machine
+CHUNK_MS = MAX_WAIT_MS - TAIL_MARGIN_MS
 FRAME = "/plugins/atlas/view"
 DEFAULT_BASE_URL = "http://localhost:7870"  # protoAgent's default console
 
@@ -58,7 +60,7 @@ def tour_slides(model: dict, tours: dict | None, tour: str) -> tuple[list[dict] 
         return auto["slides"], auto.get("title") or "Overview", ""
     for t in L.tour_list(tours):
         if t.get("id") == tour:
-            return list(t.get("slides") or []), str(t.get("title") or tour), ""
+            return list(t.get("slides") or []), clean_title(t.get("title") or tour), ""
     known = [str(t.get("id")) for t in L.tour_list(tours)] + ["auto"]
     return None, "", f"unknown tour {tour!r}. Tours: {', '.join(known)}"
 
@@ -100,7 +102,17 @@ def _collapse(label: str) -> list[str]:
 
 
 def _yaml_str(s: str) -> str:
-    return json.dumps(s, ensure_ascii=False)  # JSON strings are valid YAML scalars
+    # JSON strings are valid YAML scalars; ASCII-only escapes (\uXXXX) keep NEL / U+2028 and other
+    # characters YAML treats as line breaks out of the raw text
+    return json.dumps(s, ensure_ascii=True)
+
+
+_BREAKS = re.compile(r"[\u0000-\u001f\u007f-\u009f\u2028\u2029]+")
+
+
+def clean_title(t) -> str:
+    """The tour title as the viewer shows it in its menu (web/src/logic.mjs ``cleanTitle``)."""
+    return re.sub(r"\s+", " ", _BREAKS.sub(" ", str(t or ""))).strip() or "Tour"
 
 
 def shot_script(
@@ -130,6 +142,8 @@ def shot_script(
     w, h = int(m.group(1)), int(m.group(2))
     if color_scheme not in ("dark", "light"):
         return None, 0, "color_scheme must be dark or light"
+    if base_url and not re.fullmatch(r"https?://[^\s/?#]+(/[^\s?#]*)?", base_url.strip()):
+        return None, 0, f"base_url {base_url!r} must be an http(s) URL like http://localhost:7870"
     if bearer_env and not re.fullmatch(r"[A-Z_][A-Z0-9_]*", bearer_env):
         return None, 0, "bearer_env must be an environment variable NAME like CAMPAIGN_APP_TOKEN"
     marks = timeline(model, slides, speed)
@@ -165,18 +179,30 @@ def shot_script(
         f"  - wait_for: {{selector: '[data-atlas-state=presenting]', frame: {f}, timeout_ms: 10000}}",
         "  - mark: start",
     ]
-    # one wait per ≤ 3 min chunk (Campaign's per-step ceiling): wait for the slide that starts
-    # the next chunk, then for tour-done
-    t0 = 0
-    for i, t in enumerate(marks[:-1]):
-        if t - t0 > MAX_WAIT_MS * 0.8:
-            lines.append(
-                f"  - wait_for: {{selector: '[data-atlas-slide=\"{i + 2}\"]', frame: {f}, timeout_ms: {MAX_WAIT_MS}}}"
+    # Campaign caps one wait at 3 min: wait on the LAST slide start that still fits within the cap
+    # (minus a margin for camera drift) from the previous wait, then for tour-done.
+    starts = [0, *marks[:-1]]  # slide k (1-based) starts when slide k-1 is done
+    for k in range(len(marks)):
+        if marks[k] - starts[k] > CHUNK_MS:
+            return (
+                None,
+                0,
+                (
+                    f"slide {k + 1} runs {round((marks[k] - starts[k]) / 1000)} s — longer than one recorder wait "
+                    f"({CHUNK_MS // 1000} s). Shorten its hold_ms / split the flow into several slides."
+                ),
             )
-            t0 = t
-    tail = min(MAX_WAIT_MS, duration - t0 + 30_000)
+    t0, k = 0, 0  # k = index of the slide the last wait landed on (0 = the start)
+    while marks[-1] - t0 > CHUNK_MS:
+        nxt = max(j for j in range(k + 1, len(starts)) if starts[j] - t0 <= CHUNK_MS)
+        lines.append(
+            f"  - wait_for: {{selector: '[data-atlas-slide=\"{nxt + 1}\"]', frame: {f}, timeout_ms: {MAX_WAIT_MS}}}"
+        )
+        t0, k = starts[nxt], nxt
+    tail = marks[-1] - t0 + TAIL_MARGIN_MS
+    assert tail <= MAX_WAIT_MS, tail
     lines += [
-        f"  - wait_for: {{selector: '[data-atlas-state=tour-done]', frame: {f}, timeout_ms: {tail}}}",
+        f"  - wait_for: {{selector: '[data-atlas-state=tour-done]', frame: {f}, timeout_ms: {round(tail)}}}",
         "  - mark: end",
         "  - hold: 500",
     ]

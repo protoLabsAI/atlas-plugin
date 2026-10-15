@@ -1,6 +1,6 @@
 id: atlas
 name: Atlas
-version: 0.1.0
+version: 0.2.0
 description: >-
   Drill-down architecture diagrams you can explore and present. Atlas renders a
   project's LikeC4 model (a directory of .c4 files, default <project>/architecture/)

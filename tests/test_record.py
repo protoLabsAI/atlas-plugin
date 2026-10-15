@@ -4,6 +4,7 @@ shot-script tool, and the YAML against Campaign Studio's own validator when it's
 from __future__ import annotations
 
 import importlib.util
+import re
 import os
 import sys
 from pathlib import Path
@@ -59,7 +60,7 @@ def test_hold_ms_lint():
 
 
 GOLDEN = """name: "atlas-walk"
-description: "Atlas walkthrough — A walk (3 slides, ~23 s), recorded continuously in record mode."
+description: "Atlas walkthrough \\u2014 A walk (3 slides, ~23 s), recorded continuously in record mode."
 base_url: "http://localhost:7870"
 viewport: {width: 1280, height: 800}
 color_scheme: dark
@@ -78,10 +79,10 @@ steps:
   - wait_for: {selector: "button[aria-label=\\"Toggle bottom panel\\"][aria-pressed=\\"true\\"]:not([disabled])", state: hidden}
   - hold: 1000
   - click: {role: button, name: Tour options, frame: "/plugins/atlas/view"}
-  - click: {role: menuitem, name: "Record — A walk", exact: true, frame: "/plugins/atlas/view"}
+  - click: {role: menuitem, name: "Record \\u2014 A walk", exact: true, frame: "/plugins/atlas/view"}
   - wait_for: {selector: '[data-atlas-state=presenting]', frame: "/plugins/atlas/view", timeout_ms: 10000}
   - mark: start
-  - wait_for: {selector: '[data-atlas-state=tour-done]', frame: "/plugins/atlas/view", timeout_ms: 52600}
+  - wait_for: {selector: '[data-atlas-state=tour-done]', frame: "/plugins/atlas/view", timeout_ms: 42600}
   - mark: end
   - hold: 500
 """
@@ -95,13 +96,38 @@ def test_shot_script_golden():
 
 def test_shot_script_long_tours_split_waits():
     slides = [{"view": "index", "hold_ms": 60000}] * 8  # ~8 min
-    text, ms, _ = R.shot_script(MODEL, {"tours": [{"id": "long", "slides": slides}]}, "long")
-    waits = [ln for ln in text.splitlines() if "wait_for: {selector: '[data-atlas-slide" in ln]
-    assert ms > 400_000 and len(waits) >= 2
+    text, ms, why = R.shot_script(MODEL, {"tours": [{"id": "long", "slides": slides}]}, "long")
+    assert why == "" and ms > 400_000
+    starts = [0, *R.timeline(MODEL, slides)[:-1]]
+    waits = [ln for ln in text.splitlines() if "[data-atlas-slide=" in ln]
+    landed = [0] + [starts[int(re.search(r'slide=\\?"(\d+)', ln).group(1)) - 1] for ln in waits]
+    # every chunk (wait → next wait → tour-done) fits one recorder wait with its margin
+    for a, b in zip(landed, [*landed[1:], ms]):
+        assert 0 < b - a <= R.CHUNK_MS, (a, b)
     assert all(
-        int(ln.rsplit("timeout_ms: ", 1)[1].rstrip("}")) <= 180_000 for ln in text.splitlines() if "timeout_ms" in ln
+        int(ln.rsplit("timeout_ms: ", 1)[1].rstrip("}")) <= R.MAX_WAIT_MS
+        for ln in text.splitlines()
+        if "timeout_ms" in ln
     )
     assert "total_timeout_s: 580" in text  # the take + 90 s of setup margin
+
+
+def test_a_slide_longer_than_one_wait_is_refused():
+    steps = [{"id": f"step-{n:02d}", "source": "user", "target": "app.api", "label": "x"} for n in range(1, 100)]
+    model = {
+        **MODEL,
+        "views": {**MODEL["views"], "huge": {"_type": "dynamic", "id": "huge", "nodes": [], "edges": steps}},
+    }
+    text, _, why = R.shot_script(model, {"tours": [{"id": "t", "slides": [{"view": "huge"}]}]}, "t")
+    assert text is None and "longer than one recorder wait" in why
+
+
+def test_titles_and_base_url():
+    tours = {"tours": [{"id": "t", "title": "A\u2028walk\u0085 through ünïcode", "slides": [{"view": "index"}]}]}
+    text, _, _ = R.shot_script(MODEL, tours, "t", base_url="https://atlas.example/x")
+    assert text.isascii() and "Record \\u2014 A walk through \\u00fcn\\u00efcode" in text
+    assert R.shot_script(MODEL, tours, "t", base_url="javascript:alert(1)")[2].startswith("base_url")
+    assert R.shot_script(MODEL, tours, "t", base_url="file:///etc")[0] is None
 
 
 @pytest.mark.parametrize(
@@ -123,7 +149,7 @@ async def test_record_tool(tmp_path, registry):
     tools = {t.name: t for t in build_tools(_StubService(MODEL, TOURS, tmp_path), registry)}
     out = await tools["atlas_record_script"].ainvoke({"tour": "auto", "base_url": "http://h:1"})
     assert out.startswith("Shot script for tour auto — about ") and '```yaml\nname: "atlas-auto"' in out
-    assert "Record — Overview" in out
+    assert "Record \\u2014 Overview" in out
 
 
 CAMPAIGN = Path(os.environ.get("CAMPAIGN_PLUGIN_DIR", Path.home() / "dev" / "campaign-plugin")) / "shotscript.py"
