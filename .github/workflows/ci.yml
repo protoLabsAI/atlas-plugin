@@ -1,0 +1,39 @@
+name: CI
+
+# Lint + test on the org's Namespace Linux profile (override NSC_RUNNER on a fork that
+# lacks it). The suite is host-free (only requirements-dev.txt); Node runs the REAL vendored
+# layout engine against examples/protoagent.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ${{ vars.NSC_RUNNER || 'namespace-profile-protolabs-linux' }}
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dev deps
+        run: pip install -r requirements-dev.txt ruff
+
+      - name: Lint
+        run: ruff check . && ruff format --check .
+
+      - name: Test
+        run: pytest -q
+
+      - name: Example model validates
+        run: node vendor/atlas-engine.mjs validate examples/protoagent | tee /dev/stderr | python -c "import json,sys; sys.exit(0 if json.load(sys.stdin)['ok'] else 1)"

@@ -1,0 +1,11 @@
+/* Dev stub of the protoAgent DS plugin-kit.css: the --pl-* defaults (dark) only. */
+:root {
+  color-scheme: dark;
+  --pl-color-bg: #0a0a0c; --pl-color-bg-raised: #131316; --pl-color-bg-subtle: #1c1c22;
+  --pl-color-fg: #ededed; --pl-color-fg-muted: #a1a1aa; --pl-color-fg-subtle: #71717a;
+  --pl-color-border: rgba(255, 255, 255, 0.08); --pl-color-accent: #9b87f2;
+  --pl-color-status-error: #f87171;
+  --pl-font-sans: "Geist", system-ui, -apple-system, sans-serif;
+  --pl-font-mono: "Geist Mono", ui-monospace, "SF Mono", monospace;
+  --pl-radius: 6px;
+}

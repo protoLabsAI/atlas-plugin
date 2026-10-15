@@ -1,0 +1,25 @@
+{
+  "name": "atlas-plugin-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:engine": "esbuild engine.mjs --bundle --platform=node --format=esm --target=node20 --outfile=../vendor/atlas-engine.mjs --log-level=warning --legal-comments=linked --alias:bundle-require=./stubs/bundle-require.mjs \"--banner:js=import{createRequire as __cr}from'module';const require=__cr(import.meta.url);\"",
+    "build:view": "vite build",
+    "build": "npm run build:engine && npm run build:view",
+    "test": "node --test \"test/*.test.mjs\""
+  },
+  "dependencies": {
+    "@likec4/core": "1.60.0",
+    "@likec4/diagram": "1.60.0",
+    "@likec4/language-services": "1.60.0",
+    "@likec4/layouts": "1.60.0",
+    "@likec4/styles": "1.60.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "6.1.2",
+    "esbuild": "0.28.2",
+    "vite": "8.3.4"
+  }
+}

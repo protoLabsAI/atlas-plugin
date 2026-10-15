@@ -1,0 +1,36 @@
+views {
+  view index {
+    title 'System context'
+    include *
+    autoLayout LeftRight
+  }
+
+  view proto_agent_detail of proto_agent {
+    title 'protoAgent containers'
+    include *
+    autoLayout LeftRight
+  }
+
+  view proto_agent_graph_detail of proto_agent.graph {
+    title 'Agent graph components'
+    include *
+  }
+
+  view proto_agent_server_detail of proto_agent.server {
+    title 'Server components'
+    include *
+  }
+
+  dynamic view chat_turn_flow {
+    title 'Chat turn'
+    operator -> proto_agent.console 'sends message'
+    proto_agent.console -> proto_agent.server.chat 'POST chat'
+    proto_agent.server.chat -> proto_agent.graph.agent_core 'astream'
+    proto_agent.graph.agent_core -> proto_agent.graph.llm_client 'model call'
+    proto_agent.graph.llm_client -> gateway 'completion'
+    proto_agent.graph.agent_core -> proto_agent.tools 'tool call'
+    proto_agent.graph.agent_core -> proto_agent.graph.checkpointer 'persist'
+    proto_agent.server.chat <- proto_agent.graph.agent_core 'final answer'
+    proto_agent.console <- proto_agent.server.chat 'SSE stream'
+  }
+}

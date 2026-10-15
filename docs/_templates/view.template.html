@@ -1,0 +1,59 @@
+<!--
+  A four-rules-compliant plugin view. Served at /plugins/my_plugin/view (PUBLIC), it
+  pulls data from /api/plugins/my_plugin/* (GATED) via the DS kit's authed fetch.
+  Store this as a Python string (PAGE = r"""...""") and return it as HTMLResponse.
+  No build step — vanilla JS + the design-system kit.
+-->
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>My Plugin</title>
+<style>
+  /* Use --pl-* tokens from the kit; never hardcode hex (except as var() fallbacks). */
+  html,body{margin:0;background:var(--pl-color-bg);color:var(--pl-color-fg);
+    font-family:var(--pl-font-sans);font-size:13px}
+  .wrap{max-width:1100px;margin:0 auto;padding:var(--pl-space-4) var(--pl-space-6)}
+</style>
+<script>
+  // RULE 3 — slug-aware base: "" on the host window, "/agents/<slug>" through the
+  // fleet proxy. Split on the prefix this page is served under; prefix EVERY asset.
+  var BASE = location.pathname.split("/plugins/")[0];
+  // RULE 4 — link the DS kit CSS off BASE (so it re-themes live).
+  (function(){ var l=document.createElement("link"); l.rel="stylesheet";
+    l.href=BASE+"/_ds/plugin-kit.css"; document.head.appendChild(l); })();
+</script>
+</head><body><div class="wrap">
+  <h1>My Plugin</h1>
+  <div id="err" class="pl-callout pl-callout--error" hidden></div>
+  <div id="out"></div>
+</div>
+<script type="module">
+  // RULE 4 — plugin-kit.js is an ES MODULE → dynamic import (a classic <script src>
+  // throws on its exports). Fall back to a tokenless shim on an older host with no /_ds.
+  let kit;
+  try { kit = await import(BASE + "/_ds/plugin-kit.js"); }
+  catch (e) { kit = { initPluginView(){}, apiFetch: (p, i) => fetch(BASE + p, i) }; }
+
+  async function load(){
+    try {
+      // RULES 2+3 — gated data via the kit's slug-aware authed fetch (pass a bare path).
+      const r = await kit.apiFetch("/api/plugins/my_plugin/data").then(x => x.json());
+      document.getElementById("out").textContent = JSON.stringify(r);
+      document.getElementById("err").hidden = true;
+    } catch (e) {
+      const el = document.getElementById("err"); el.hidden = false; el.textContent = "" + e;
+    }
+  }
+
+  // Boot once, on whichever fires first: the protoagent:init handshake (bearer +
+  // theme arrive with it) or a short timer (standalone / no-handshake case).
+  let booted = false;
+  function boot(){ if (booted) return; booted = true; load(); }
+  kit.initPluginView(boot);
+  setTimeout(boot, 800);
+
+  // To render UNTRUSTED / model-generated HTML, nest it in an iframe WITHOUT
+  // allow-same-origin (a real sandbox boundary):
+  //   <iframe sandbox="allow-scripts" srcdoc="..."></iframe>
+</script>
+</body></html>

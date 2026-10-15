@@ -1,0 +1,17 @@
+{
+  "tours": [
+    {
+      "id": "overview",
+      "title": "protoAgent in 5 minutes",
+      "slides": [
+        {"view": "index", "focus": "proto_agent", "note": "protoAgent is a **LangGraph agent runtime**. Operators use the console; peers reach it over A2A and the OpenAI-compatible `/v1` API; every model call goes through a LiteLLM gateway."},
+        {"view": "proto_agent_detail", "via": "proto_agent", "note": "Inside: the FastAPI **server**, the operator API, the agent **graph**, tools, knowledge, the scheduler, and the plugin runtime. The server never calls the model directly."},
+        {"view": "proto_agent_server_detail", "via": "proto_agent.server", "note": "The server hosts chat, the A2A routes and the turn stream, and wires plugins in at boot."},
+        {"view": "proto_agent_graph_detail", "via": "proto_agent.graph", "note": "The graph owns the tool loop, subagent delegation, middleware (compaction) and the checkpointer. Model selection is gateway config, not code."},
+        {"view": "chat_turn_flow", "step": 1, "note": "A chat turn, step by step: the operator sends a message from the console."},
+        {"view": "chat_turn_flow", "step": 5, "note": "The graph's LLM client sends the completion to the gateway…"},
+        {"view": "chat_turn_flow", "step": 9, "note": "…and the final answer streams back to the console over SSE."}
+      ]
+    }
+  ]
+}

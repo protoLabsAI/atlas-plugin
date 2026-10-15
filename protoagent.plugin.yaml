@@ -1,0 +1,51 @@
+id: atlas
+name: Atlas
+version: 0.1.0
+description: >-
+  Drill-down architecture diagrams you can explore and present. Atlas renders a
+  project's LikeC4 model (a directory of .c4 files, default <project>/architecture/)
+  as a console view: click an element to drill into it, follow code links into the
+  console's code pane, and run guided tours in presenter mode. The agent gets three
+  tools (atlas_validate, atlas_describe, atlas_show) and a skill for authoring the
+  model. Layout runs in a vendored, offline engine that needs Node.js 20 or newer —
+  the one on PATH, or protoAgent's managed Node runtime (one click from the setup
+  banner).
+enabled: false
+repository: https://github.com/protoLabsAI/atlas-plugin
+# 0.182.0 is the newest host API used: the protoagent:code:open view bridge message
+# (0.182). Also relied on: live_project_registry (0.177), register_setup_step +
+# plugin_setup actions (0.165), setup-gap actions (0.162), sdk.plugin_store (0.148),
+# the managed Node runtime (0.104), live_config (0.71).
+min_protoagent_version: "0.182.0"
+
+config_section: atlas
+config:
+  model_dir: architecture   # the model's directory — relative to the project root, or absolute
+  project: ""               # which filesystem project the model belongs to; blank = auto
+  node_path: ""             # a Node.js >= 20 executable; blank = node on PATH, then the managed runtime
+
+# Settings ▸ Plugins ▸ Atlas. Read live — a change applies on the next request.
+settings:
+  - { key: model_dir, label: "Model directory", type: string, description: "Where the LikeC4 model (.c4 files + likec4.config.json) lives. Relative to the project root, or an absolute path." }
+  - { key: project, label: "Project", type: string, description: "The filesystem project the model describes (a name from Settings ▸ Filesystem). Code links in the model open files in it. Blank picks the console's project, else the first one." }
+  - { key: node_path, label: "Node.js path", type: string, spawns: true, description: "A Node.js 20+ executable to run the layout engine with. Blank uses node on PATH, then protoAgent's managed Node runtime." }
+
+# Console view (ADR 0026). The page is PUBLIC (an iframe navigation carries no bearer);
+# the model and status are GATED under /api/plugins/atlas.
+views:
+  - { id: atlas, label: "Atlas", icon: Map, path: /plugins/atlas/view }
+
+# The built viewer's JS/CSS. A <script>/<link> load carries no Authorization header any
+# more than the iframe navigation does, so on a token-gated host these must be exempt.
+# Static, non-secret files only — the model itself stays behind the bearer.
+public_paths:
+  - "/plugins/atlas/static/"
+
+# Bus topics (ADR 0039). The open viewer subscribes to atlas.# and navigates.
+emits:
+  - atlas.show   # {view?, step?, focus?, tour?, slide?, present} — the agent asked to show a view / tour
+
+# Declarative transparency (surfaced in the console; not enforced).
+capabilities:
+  network: []          # none — the engine + viewer are vendored and served locally
+  filesystem: scoped   # reads the model directory (and checks code-link targets) in the project

@@ -1,0 +1,35 @@
+# protoagent.plugin.yaml — the plugin manifest. DATA ONLY: the host reads this
+# without importing your code (discovery ≠ enable). Keep `version` in lockstep with
+# pyproject.toml (add a test asserting they match).
+id: my_plugin                  # unique id; also the default config-section name
+name: My Plugin (what it does)
+version: 0.1.0
+description: >-
+  One-paragraph description shown in the install review + console. Say what it
+  contributes and what it requires.
+enabled: false                 # SHIP DISABLED — enabling is the operator's trust decision
+repository: https://github.com/protoLabsAI/my-plugin
+min_protoagent_version: "0.27.0"   # refuse/warn on older hosts (console views, etc.)
+
+# Config: defaults are the source of truth; langgraph-config.yaml overlays them,
+# then secrets.yaml overlays the `secrets` keys. Read via registry.config.
+config_section: my_plugin
+config:
+  some_setting: "default"
+  api_key: ""                  # a secret (declared below) → never plaintext in tracked YAML
+secrets: [api_key]
+
+# Only if the plugin needs them:
+# requires_env: [SOME_TOKEN]   # must be set for the plugin to enable
+# requires_pip: [httpx>=0.27]  # DECLARED, not auto-installed (operator runs install-deps)
+
+# Console view(s) — a left-rail icon whose panel iframes a page YOU serve. The path
+# MUST be a route your register_router serves, on the PUBLIC /plugins/<id> prefix
+# (an iframe navigation can't carry a bearer). Data routes go on /api/plugins/<id>.
+views:
+  - { id: main, label: "My Plugin", icon: LayoutGrid, path: /plugins/my_plugin/view }
+
+# Declarative transparency (shown in the console; not yet enforced).
+capabilities:
+  network: ["*"]               # or a host allowlist, or [] for none
+  filesystem: none             # none | scoped | worktree

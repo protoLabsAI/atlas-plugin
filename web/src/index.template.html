@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atlas</title>
+<style>/*__ATLAS_CSS__*/</style>
+<script>
+  // RULE 3 - slug-aware base: "" on the host window, "/agents/<slug>" through the fleet proxy.
+  var BASE = location.pathname.split("/plugins/")[0];
+  window.ATLAS_BASE = BASE;
+  (function () {
+    // RULE 4 - the DS kit stylesheet (before our own styles so they can refine it).
+    var l = document.createElement("link");
+    l.rel = "stylesheet"; l.href = BASE + "/_ds/plugin-kit.css";
+    document.head.insertBefore(l, document.head.querySelector("style"));
+    // The viewer bundle, BASE-prefixed (the page URL has no trailing slash, so no relative URLs).
+    var s = document.createElement("script");
+    s.type = "module"; s.src = BASE + "/plugins/atlas/static/__ATLAS_ENTRY__";
+    s.onerror = function () {
+      var b = document.getElementById("boot");
+      if (b) b.textContent = "Atlas could not load its viewer bundle (" + s.src + ").";
+    };
+    document.head.appendChild(s);
+  })();
+</script>
+</head><body><div id="root"><div id="boot" class="boot">Loading Atlas…</div></div></body></html>

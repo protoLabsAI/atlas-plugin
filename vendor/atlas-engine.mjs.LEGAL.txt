@@ -1,0 +1,36 @@
+Bundled license information:
+
+word-wrap/index.js:
+  /*!
+   * word-wrap <https://github.com/jonschlinkert/word-wrap>
+   *
+   * Copyright (c) 2014-2023, Jon Schlinkert.
+   * Released under the MIT License.
+   */
+
+@likec4/core/dist/chunks/libs/chroma-js.mjs:
+  /**
+  * @license
+  *
+  * The APCA contrast prediction algorithm is based of the formulas published
+  * in the APCA-1.0.98G specification by Myndex. The specification is available at:
+  * https://raw.githubusercontent.com/Myndex/apca-w3/master/images/APCAw3_0.1.17_APCA0.0.98G.svg
+  *
+  * Note that the APCA implementation is still beta, so please update to
+  * future versions of chroma.js when they become available.
+  *
+  * You can read more about the APCA Readability Criterion at
+  * https://readtech.org/ARC/
+  */
+
+@likec4/core/dist/chunks/types.mjs:
+  /*
+  * @version    1.4.1
+  * @date       2026-09-02
+  * @stability  3 - Stable
+  * @author     Lauri Rooden (https://github.com/litejs/natural-compare-lite)
+  * @license    MIT License
+  */
+
+chokidar/index.js:
+  /*! chokidar - MIT License (c) 2012 Paul Miller (paulmillr.com) */

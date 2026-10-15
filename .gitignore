@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.venv/
+web/node_modules/
+web/dist/
+# static/ (the built viewer) and vendor/ (the built engine) are COMMITTED — the plugin
+# installs from git with no build step.

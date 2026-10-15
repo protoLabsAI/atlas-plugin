@@ -1,0 +1,139 @@
+/* Atlas viewer. Colours/fonts from the DS kit's --pl-* tokens (the console's live theme);
+   hex only as var() fallbacks. The kit maps bg, bg-raised/subtle, fg, fg-muted, accent and
+   border from the console; everything else derives from those via color-mix. */
+* { box-sizing: border-box }
+html, body, #root { margin: 0; height: 100%; overflow: hidden }
+body {
+  background: var(--pl-color-bg, #0a0a0c); color: var(--pl-color-fg, #ededed);
+  font-family: var(--pl-font-sans, ui-sans-serif, system-ui, sans-serif); font-size: 13px; line-height: 1.45;
+  --a-muted: var(--pl-color-fg-muted, #a1a1aa);
+  --a-raised: var(--pl-color-bg-raised, #131316);
+  --a-border: var(--pl-color-border, rgba(127,127,127,.18));
+  --a-accent: var(--pl-color-accent, #9b87f2);
+  --a-hover: color-mix(in srgb, var(--pl-color-fg, #ededed) 7%, transparent);
+  --a-error: var(--pl-color-status-error, #f87171);
+  --a-error-bg: color-mix(in srgb, var(--a-error) 12%, var(--pl-color-bg, #0a0a0c));
+  --a-shadow: 0 8px 28px rgba(0,0,0,.28);
+}
+:root[data-scheme="light"] body { --a-error: #c2410c; --a-shadow: 0 8px 28px rgba(0,0,0,.12) }
+button { font: inherit; color: inherit }
+code { font-family: var(--pl-font-mono, ui-monospace, monospace); font-size: .92em }
+.boot { padding: 24px; color: var(--a-muted) }
+.muted { color: var(--a-muted) }
+.small { font-size: 12px }
+.app { display: flex; flex-direction: column; height: 100% }
+
+/* toolbar */
+.bar { display: flex; align-items: center; gap: 8px; padding: 6px 10px; min-height: 42px; flex: 0 0 auto;
+  border-bottom: 1px solid var(--a-border); min-width: 0 }
+.crumbs { display: flex; align-items: center; min-width: 0; overflow: hidden; white-space: nowrap; flex: 0 1 auto }
+.crumb { display: inline-flex; align-items: center; min-width: 0 }
+.crumb .sep { color: var(--a-muted); margin: 0 2px; opacity: .7 }
+.crumb button { background: none; border: 0; padding: 3px 6px; border-radius: 5px; cursor: pointer; color: var(--a-muted);
+  overflow: hidden; text-overflow: ellipsis; max-width: 26ch }
+.crumb button:hover { background: var(--a-hover); color: var(--pl-color-fg, #ededed) }
+.crumb button.here { color: var(--pl-color-fg, #ededed); font-weight: 600 }
+.sp { flex: 1 1 0; min-width: 4px }
+.viewpick, .search input, .p-tour { font: inherit; font-size: 12px; height: 28px; padding: 0 8px; border-radius: var(--pl-radius, 6px);
+  background: var(--a-raised); color: var(--pl-color-fg, #ededed); border: 1px solid var(--a-border); outline: none; max-width: 30ch }
+.viewpick:focus, .search input:focus, .p-tour:focus { border-color: var(--a-accent) }
+.search { position: relative }
+.search input { width: 22ch }
+.hits { position: absolute; right: 0; top: 32px; z-index: 30; list-style: none; margin: 0; padding: 4px; width: 340px; max-height: 60vh; overflow: auto;
+  background: var(--a-raised); border: 1px solid var(--a-border); border-radius: 8px; box-shadow: var(--a-shadow) }
+.hits button { display: flex; width: 100%; gap: 8px; align-items: baseline; text-align: left; background: none; border: 0; padding: 6px 8px; border-radius: 5px; cursor: pointer }
+.hits button:hover { background: var(--a-hover) }
+.h-title { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.h-sub { color: var(--a-muted); font-size: 11px; margin-left: auto; white-space: nowrap }
+.nohit { padding: 6px 8px }
+.pl-btn { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; font-size: 12px; cursor: pointer;
+  border-radius: var(--pl-radius, 6px); border: 1px solid var(--a-border); background: var(--a-raised); color: var(--pl-color-fg, #ededed); white-space: nowrap }
+.pl-btn:hover { border-color: var(--a-accent) }
+.present-btn { background: var(--a-accent); border-color: var(--a-accent); color: var(--pl-color-bg, #0a0a0c); font-weight: 600 }
+.linkish { background: none; border: 0; padding: 0; color: var(--a-accent); cursor: pointer; text-align: left }
+.linkish:hover { text-decoration: underline }
+
+/* banners */
+.banner { padding: 6px 12px; font-size: 12px; border-bottom: 1px solid var(--a-border); flex: 0 0 auto }
+.banner-error { background: var(--a-error-bg); border-bottom-color: color-mix(in srgb, var(--a-error) 35%, transparent) }
+.banner-error strong { color: var(--a-error) }
+.banner-warn { color: var(--a-muted) }
+.banner.compact { position: absolute; top: 44px; left: 50%; transform: translateX(-50%); z-index: 20; border-radius: 8px; border: 1px solid var(--a-border); max-width: min(900px, calc(100% - 32px)) }
+.b-row { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap }
+.b-sub { color: var(--a-muted) }
+.b-err { display: inline-flex; gap: 8px; align-items: baseline; min-width: 0 }
+.b-loc { font-family: var(--pl-font-mono, ui-monospace, monospace); font-size: 12px; white-space: nowrap }
+.b-msg { overflow-wrap: anywhere }
+.b-list { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 3px; max-height: 30vh; overflow: auto }
+
+/* main */
+.main { position: relative; flex: 1 1 auto; min-height: 0; display: flex }
+.canvas { position: relative; flex: 1 1 auto; min-width: 0 }
+.canvas-tools { position: absolute; right: 12px; bottom: 12px; display: flex; gap: 6px; align-items: center; z-index: 5 }
+.walkpos { font-size: 12px; color: var(--a-muted); font-variant-numeric: tabular-nums; padding: 0 4px }
+.view-desc { position: absolute; left: 12px; bottom: 12px; max-width: min(520px, 50%); font-size: 12px; color: var(--a-muted); pointer-events: none }
+
+/* details */
+.details { flex: 0 0 340px; max-width: 45%; overflow: auto; padding: 14px 16px 18px; border-left: 1px solid var(--a-border);
+  background: var(--a-raised); position: relative }
+.details header { padding-right: 24px }
+.details h2 { margin: 2px 0 6px; font-size: 17px; line-height: 1.25 }
+.details h3 { margin: 16px 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--a-muted); font-weight: 600 }
+.d-kind { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--a-muted) }
+.d-kind .linkish { text-transform: none; letter-spacing: 0; font-size: 12px }
+.d-close { position: absolute; top: 10px; right: 10px; width: 26px; height: 26px; border: 0; border-radius: 5px; background: none; cursor: pointer; color: var(--a-muted); font-size: 17px }
+.d-close:hover { background: var(--a-hover); color: var(--pl-color-fg, #ededed) }
+.d-tech { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--a-border); color: var(--a-muted); margin-bottom: 6px }
+.d-summary p, .d-desc p { margin: 6px 0 }
+.d-desc { color: var(--a-muted) }
+.d-drill { margin-top: 10px }
+.d-links, .d-views { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px }
+.d-code, .d-web { display: grid; grid-template-columns: 18px 1fr; gap: 0 6px; width: 100%; text-align: left; padding: 6px 8px; border-radius: 6px;
+  border: 1px solid var(--a-border); background: var(--pl-color-bg, #0a0a0c); cursor: pointer; text-decoration: none; color: inherit }
+.d-code:hover, .d-web:hover { border-color: var(--a-accent) }
+.d-ico { grid-row: span 2; color: var(--a-accent); text-align: center }
+.d-ltitle { font-weight: 500 }
+.d-code code { color: var(--a-muted); font-size: 11px; overflow-wrap: anywhere }
+.d-other { color: var(--a-muted) }
+.d-meta { margin: 0; display: grid; gap: 4px }
+.d-meta div { display: grid; grid-template-columns: minmax(70px, 35%) 1fr; gap: 8px }
+.d-meta dt { color: var(--a-muted) } .d-meta dd { margin: 0; overflow-wrap: anywhere }
+.d-tags { display: flex; flex-wrap: wrap; gap: 4px }
+.tag { font-size: 11px; padding: 1px 7px; border-radius: 999px; background: var(--a-hover); color: var(--a-muted) }
+.details footer { margin-top: 18px } .d-fqn { color: var(--a-muted); font-size: 11px }
+
+/* states */
+.state { flex: 1; display: grid; place-items: center; padding: 24px; overflow: auto }
+.state-card { max-width: 520px; text-align: center; color: var(--pl-color-fg, #ededed) }
+.state-card.wide { max-width: 760px; text-align: left }
+.state-card h1 { font-size: 19px; margin: 8px 0 }
+.state-card p { margin: 8px 0 }
+.state-icon { font-size: 30px; color: var(--a-accent) }
+.state .b-list { max-height: none; margin-top: 12px }
+
+.toast { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 40; padding: 8px 14px; border-radius: 8px;
+  background: var(--a-raised); border: 1px solid var(--a-border); box-shadow: var(--a-shadow); font-size: 12px }
+
+/* presenter */
+.present-mode { position: relative }
+.presenter { position: relative; height: 100% }
+.stage { position: absolute; inset: 0 }
+.layer { position: absolute; inset: 0; will-change: opacity }
+.p-crumbs { position: absolute; top: 14px; left: 18px; display: flex; gap: 6px; align-items: center; font-size: 13px; color: var(--a-muted); z-index: 10; pointer-events: none }
+.p-crumbs span + span::before { content: '›'; margin-right: 6px; opacity: .6 }
+.p-crumbs .here { color: var(--pl-color-fg, #ededed); font-weight: 600 }
+.p-crumbs .focus { color: var(--a-accent); font-style: normal; margin-left: 4px }
+.p-top { position: absolute; top: 10px; right: 12px; display: flex; gap: 8px; align-items: center; z-index: 10 }
+.p-counter { font-size: 13px; color: var(--a-muted); font-variant-numeric: tabular-nums }
+.p-exit { width: 28px; height: 28px; border-radius: 6px; border: 1px solid var(--a-border); background: var(--a-raised); cursor: pointer; font-size: 16px; color: var(--a-muted) }
+.p-exit:hover { color: var(--pl-color-fg, #ededed); border-color: var(--a-accent) }
+.notes { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); width: min(760px, calc(100% - 32px)); padding: 12px 16px; border-radius: 10px; z-index: 10;
+  background: color-mix(in srgb, var(--a-raised) 90%, transparent); border: 1px solid var(--a-border); backdrop-filter: blur(6px); box-shadow: var(--a-shadow) }
+.notes-head { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--a-muted) }
+.notes-body { font-size: 15px; margin: 4px 0 6px } .notes-body p { margin: 4px 0 }
+.notes .keys { font-size: 11px; color: var(--a-muted); opacity: .8 }
+@media (prefers-reduced-motion: reduce) { .layer { will-change: auto } }
+@media (max-width: 640px) {
+  .details { position: absolute; inset: 0 0 0 auto; width: 100%; max-width: none; z-index: 15 }
+  .search input { width: 14ch } .viewpick { max-width: 16ch } .crumb button { max-width: 14ch }
+}
