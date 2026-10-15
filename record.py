@@ -84,6 +84,21 @@ def timeline(model: dict, slides: list[dict], speed: str = "normal") -> list[int
     return out
 
 
+# The console's dock toggles (bottom-right): aria-pressed="true" while that dock is open; disabled
+# when it holds nothing. Scripts can't branch, so each collapse clicks the LAST of
+# `body, <the open toggle>` in document order: the toggle when that dock is open, else <body>
+# (a click on the Atlas canvas, which only clears a selection). Then it waits until it's closed.
+DOCKS = ("Toggle side panel", "Toggle bottom panel")
+
+
+def _collapse(label: str) -> list[str]:
+    open_toggle = f'button[aria-label="{label}"][aria-pressed="true"]:not([disabled])'
+    return [
+        f"  - click: {{selector: {_yaml_str('body, ' + open_toggle)}, nth: last}}",
+        f"  - wait_for: {{selector: {_yaml_str(open_toggle)}, state: hidden}}",
+    ]
+
+
 def _yaml_str(s: str) -> str:
     return json.dumps(s, ensure_ascii=False)  # JSON strings are valid YAML scalars
 
@@ -142,6 +157,8 @@ def shot_script(
         "  - wait_for: {role: button, name: Atlas, timeout_ms: 60000}",
         "  - click: {role: button, name: Atlas}",
         f"  - wait_for: {{selector: '[data-atlas-state=ready]', frame: {f}, timeout_ms: 60000}}",
+        # give Atlas the whole content area: collapse the console's side + bottom docks when open
+        *[ln for dock in DOCKS for ln in _collapse(dock)],
         "  - hold: 1000",
         f"  - click: {{role: button, name: Tour options, frame: {f}}}",
         f"  - click: {{role: menuitem, name: {_yaml_str('Record — ' + title)}, exact: true, frame: {f}}}",

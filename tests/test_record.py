@@ -72,6 +72,10 @@ steps:
   - wait_for: {role: button, name: Atlas, timeout_ms: 60000}
   - click: {role: button, name: Atlas}
   - wait_for: {selector: '[data-atlas-state=ready]', frame: "/plugins/atlas/view", timeout_ms: 60000}
+  - click: {selector: "body, button[aria-label=\\"Toggle side panel\\"][aria-pressed=\\"true\\"]:not([disabled])", nth: last}
+  - wait_for: {selector: "button[aria-label=\\"Toggle side panel\\"][aria-pressed=\\"true\\"]:not([disabled])", state: hidden}
+  - click: {selector: "body, button[aria-label=\\"Toggle bottom panel\\"][aria-pressed=\\"true\\"]:not([disabled])", nth: last}
+  - wait_for: {selector: "button[aria-label=\\"Toggle bottom panel\\"][aria-pressed=\\"true\\"]:not([disabled])", state: hidden}
   - hold: 1000
   - click: {role: button, name: Tour options, frame: "/plugins/atlas/view"}
   - click: {role: menuitem, name: "Record — A walk", exact: true, frame: "/plugins/atlas/view"}

@@ -60,7 +60,8 @@ Atlas is recordable without any coupling to a recorder:
   `#view=<id>&focus=<fqn>[,<fqn>]&step=<n>` work when the page is opened directly. The console doesn't
   forward a hash into a plugin view's iframe, so inside the console use the menu (that's what the script does).
 - **`atlas_record_script(tour)`** writes the shot script. It opens `/app/`, clicks the *Atlas* rail
-  button, waits for `ready`, then opens *Tour options* → *Record — <tour title>*. It marks `start`,
+  button, waits for `ready`, collapses the console's side and bottom docks when they're open (so Atlas fills
+  the content area), then opens *Tour options* → *Record — <tour title>*. It marks `start`,
   waits for `tour-done` (split into ≤ 3 min waits on `data-atlas-slide` for long tours), and marks `end`.
   It returns the expected duration from the same timing model the viewer runs. The footage between
   the marks is one continuous take of the Atlas view: no cuts, and nothing to ramp.
