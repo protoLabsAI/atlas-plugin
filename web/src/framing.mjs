@@ -24,12 +24,15 @@ const fitZoom = (b, S) => Math.min(S.width / Math.max(1, b.x2 - b.x), S.height /
 export const leavesOf = (view) => (view?.nodes ?? []).filter((n) => !(n.children?.length) && n.width > 0)
 
 /** The flow box covering some nodes + the labels of the edges between them. */
-export function contentBox(view, ids) {
+export function contentBox(view, ids, ke = 1) {
   const set = new Set(ids)
+  // a label is shown ke× its layout size, grown around its centre (Stage's legible CSS)
+  const grow = (b) => ({ x: b.x - (b.width * (ke - 1)) / 2, y: b.y - (b.height * (ke - 1)) / 2, w: b.width * ke, h: b.height * ke })
   const nodes = (view?.nodes ?? []).filter((n) => set.has(n.id) && n.width > 0).map(box)
   const labels = (view?.edges ?? [])
     .filter((e) => set.has(e.source) && set.has(e.target) && e.labelBBox?.width > 0)
-    .map((e) => ({ x: e.labelBBox.x, y: e.labelBBox.y, x2: e.labelBBox.x + e.labelBBox.width, y2: e.labelBBox.y + e.labelBBox.height }))
+    .map((e) => grow(e.labelBBox))
+    .map((b) => ({ x: b.x, y: b.y, x2: b.x + b.w, y2: b.y + b.h }))
   return union([...nodes, ...labels])
 }
 
@@ -69,7 +72,8 @@ export function cluster(view, seed, S, zMin) {
  * The camera for a slide. `subject`: node ids the slide is about (a focus, a step's two ends),
  * or null for the whole view. → {vp: {x, y, zoom}, k, ke, cropped, visible: [ids], partial: [ids]}
  */
-export function frameSlide(view, canvas, insets = {}, { subject = null, kFixed, zoomCap = 1.25, t = LEGIBLE } = {}) {
+export function frameSlide(view, canvas, insets = {}, { subject = null, kFixed, keFixed = 1, zoomCap = 1.25, t = LEGIBLE } = {}) {
+  const boxOf = (ids) => contentBox(view, ids, keFixed)
   const S0 = safeRect(canvas, insets)
   const S = { ...S0, x2: S0.x + S0.width, y2: S0.y + S0.height }
   const leaves = leavesOf(view)
@@ -84,7 +88,7 @@ export function frameSlide(view, canvas, insets = {}, { subject = null, kFixed, 
   const core = new Set(ids) // a focus / step subject is never let go
   let B
   let cropped = false
-  if (ids.length) B = contentBox(view, ids)
+  if (ids.length) B = boxOf(ids)
   else if (zAll >= zMin - 1e-9) B = all
   else {
     // the densest connected cluster of WHOLE nodes that's legible
@@ -96,7 +100,7 @@ export function frameSlide(view, canvas, insets = {}, { subject = null, kFixed, 
       if (!best || c.length > best.length) best = c
     }
     ids = best ?? []
-    B = contentBox(view, ids) ?? all
+    B = boxOf(ids) ?? all
     cropped = true
   }
   // place: B inside the safe rect; then no leaf may straddle the canvas edge or the safe rect
@@ -166,7 +170,7 @@ export function frameSlide(view, canvas, insets = {}, { subject = null, kFixed, 
         result = centred
         break
       }
-      const grown = contentBox(view, [...new Set([...ids, ...centred.partial])])
+      const grown = boxOf([...new Set([...ids, ...centred.partial])])
       if (!grown || fitZoom(grown, S0) < zMin - 1e-9) break
       ids = [...new Set([...ids, ...centred.partial])]
       B = grown
@@ -182,7 +186,7 @@ export function frameSlide(view, canvas, insets = {}, { subject = null, kFixed, 
     const straddling = centred.partial.length ? centred.partial : result.partial
     if (!straddling.length) break
     const takeable = straddling.filter((id) => !dropped.has(id))
-    const grown = takeable.length ? contentBox(view, [...new Set([...(ids.length ? ids : leaves.map((n) => n.id)), ...takeable])]) : null
+    const grown = takeable.length ? boxOf([...new Set([...(ids.length ? ids : leaves.map((n) => n.id)), ...takeable])]) : null
     if (grown && fitZoom(grown, S0) >= zMin - 1e-9) {
       // take the straddling nodes in whole (zooming out, never below legible)
       // (a focus / step frame absorbs its straddling neighbours and centres the group)
@@ -202,7 +206,7 @@ export function frameSlide(view, canvas, insets = {}, { subject = null, kFixed, 
       const gone = ids.filter((id) => !core.has(id)).sort((a, c) => d(a) - d(c))[0]
       dropped.add(gone)
       ids = ids.filter((id) => id !== gone)
-      B = contentBox(view, ids)
+      B = boxOf(ids)
       zoom = Math.min(fitZoom(B, S0), zMin * 1.15)
     } else break
     result = placeBest()
@@ -236,7 +240,7 @@ export function frameSlide(view, canvas, insets = {}, { subject = null, kFixed, 
     }
     const gone = spare.sort((a, c) => d(a) - d(c))[0]
     ids = ids.filter((id) => id !== gone)
-    B = contentBox(view, ids)
+    B = boxOf(ids)
     zoom = Math.min(fitZoom(B, S0), zMin * 1.15)
     result = placeBest()
   }

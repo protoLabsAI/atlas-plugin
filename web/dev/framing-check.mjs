@@ -2,7 +2,7 @@
 // example tour at 1280×720 CSS, dsf 2, and asserts from DOM geometry that every visible node is
 // wholly inside the safe rect (below the top chrome, above the caption, inside the side margins),
 // nothing is partially clipped, and the content is centred (±5 %). Writes a contact sheet.
-//   PLAYWRIGHT_FROM=<dir> node dev/framing-check.mjs [--port 4720] [--sheet path] [--tour overview]
+//   PLAYWRIGHT_FROM=<dir> node dev/framing-check.mjs [--port 4720] [--sheet path] [--tour overview] [--dark]
 // Needs dev/server.mjs serving the example model (its default).
 import { createRequire } from 'node:module'
 import { readdirSync } from 'node:fs'
@@ -16,7 +16,7 @@ const { chromium } = createRequire(join(process.env.PLAYWRIGHT_FROM ?? '.', 'pac
 const cache = join(homedir(), 'Library/Caches/ms-playwright')
 const shell = readdirSync(cache).filter((d) => d.startsWith('chromium_headless_shell')).sort().pop()
 const browser = await chromium.launch({ executablePath: join(cache, shell, 'chrome-headless-shell-mac-arm64/chrome-headless-shell') })
-const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 2 })
+const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 2, colorScheme: process.argv.includes('--dark') ? 'dark' : 'light' })
 const errs = []
 page.on('pageerror', (e) => errs.push(e.message))
 await page.goto(`${HOST}/plugins/atlas/view#tour=${TOUR}&slide=1&record=1&autoplay=0`)
@@ -40,17 +40,26 @@ const measure = () => page.evaluate(() => {
   const bad = []
   const shown = []
   const centreOn = []
+  // EVERYTHING drawn counts — leaves (dimmed ones too), compounds, edges, edge-label chips: each
+  // must be wholly inside the safe rect, wholly off the canvas, or faded out (opacity ~0)
+  const seen = (el) => { for (let e = el; e && e !== sr; e = e.parentElement) if (+getComputedStyle(e).opacity < 0.05) return false; return true }
+  const boxOf = (r) => ({ x: r.left - root.left, y: r.top - root.top, x2: r.right - root.left, y2: r.bottom - root.top })
+  const check = (el, id, kind, rectEl = el) => {
+    const r = rectEl.getBoundingClientRect()
+    if (!(r.width > 0 && r.height > 0)) return null
+    const b = { id: `${kind}:${id}`, ...boxOf(r) }
+    if (b.x2 <= 0 || b.y2 <= 0 || b.x >= W || b.y >= H || !seen(el)) return null
+    const inS = b.x >= S.x && b.y >= S.y && b.x2 <= S.x2 && b.y2 <= S.y2
+    if (!inS) bad.push(b)
+    return inS ? b : null
+  }
   for (const el of sr.querySelectorAll('.react-flow__node')) {
     const isCompound = el.classList.contains('react-flow__node-compound-element') || el.querySelector('.likec4-compound-node')
-    const r = el.getBoundingClientRect()
-    const b = { id: el.dataset.id, x: r.left - root.left, y: r.top - root.top, x2: r.right - root.left, y2: r.bottom - root.top }
-    const off = b.x2 <= 0 || b.y2 <= 0 || b.x >= W || b.y >= H
-    const inS = b.x >= S.x && b.y >= S.y && b.x2 <= S.x2 && b.y2 <= S.y2
-    if (off) continue
-    if (isCompound) { if (inS) shown.push(b); continue } // a container may frame the shot
-    if (!inS) bad.push(b)
-    else shown.push(b)
+    const b = check(el, el.dataset.id, isCompound ? 'compound' : 'node')
+    if (b) shown.push(b)
   }
+  for (const el of sr.querySelectorAll('.react-flow__edge')) check(el, el.dataset.id, 'edge', el.querySelector('path') ? el : el)
+  for (const el of sr.querySelectorAll('.likec4-edge-label-container')) check(el, el.textContent.trim().slice(0, 24), 'label', el.querySelector('.likec4-edge-label') ?? el)
   const set = centreOn.length ? centreOn : shown
   const cx = (Math.min(...set.map((b) => b.x)) + Math.max(...set.map((b) => b.x2))) / 2
   const cy = (Math.min(...set.map((b) => b.y)) + Math.max(...set.map((b) => b.y2))) / 2

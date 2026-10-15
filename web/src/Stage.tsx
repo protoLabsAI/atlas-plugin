@@ -111,7 +111,7 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
   const aimRef = useRef<string[] | null>(null)
   const ownMove = useRef(false) // our own animated moves are already framed — don't re-aim them
   const framed = (viewId: string, key?: number, subject?: string[] | null) =>
-    frameSlide(views.get(viewId), canvasSize(), insets(), { subject: subject ?? null, kFixed: key != null ? layerScale.current.get(key)?.k : undefined }) as any
+    frameSlide(views.get(viewId), canvasSize(), insets(), { subject: subject ?? null, kFixed: key != null ? layerScale.current.get(key)?.k : undefined, keFixed: key != null ? layerScale.current.get(key)?.ke : undefined }) as any
   /** the viewport (whole canvas) a view is shown with */
   const vpFor = (viewId: string, key?: number, subject?: string[] | null) =>
     legible ? framed(viewId, key, subject).vp : fitBox(views.get(viewId).bounds, fullRect(), pad)
@@ -129,6 +129,59 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
     let v = layerScale.current.get(key)
     if (!v) layerScale.current.set(key, (v = { k: kOf(viewId), ke: keOf(viewId) }))
     return v
+  }
+
+  // present / record: NOTHING is shown partly. After a camera decision (its target viewport), every
+  // node, compound, edge and edge label that would not sit wholly inside the safe rect is faded
+  // out (data-atlas-out) — a dimmed neighbour, an edge running off screen, a label cut by the edge
+  const culledAt = useRef(new Map<number, string>())
+  const moveUntil = useRef(0)
+  const cull = (key: number, vp: { x: number; y: number; zoom: number }) => {
+    if (!legible) return
+    const h = handles.current.get(key)
+    const sr = h?.el?.querySelector('.likec4-view')?.shadowRoot
+    const cur = h?.xyflow?.getViewport?.()
+    const st0 = stage.current?.getBoundingClientRect()
+    if (!sr || !cur || !st0) return
+    const v = views.get(h.el?.dataset.view ?? '')
+    const S = safeRect(canvasSize(), insets())
+    const R = { x: (S.x - vp.x) / vp.zoom, y: (S.y - vp.y) / vp.zoom, x2: (S.x + S.width - vp.x) / vp.zoom, y2: (S.y + S.height - vp.y) / vp.zoom }
+    // screen rect now → flow box (the current viewport)
+    const flow = (r: DOMRect) => ({ x: (r.left - st0.left - cur.x) / cur.zoom, y: (r.top - st0.top - cur.y) / cur.zoom, x2: (r.right - st0.left - cur.x) / cur.zoom, y2: (r.bottom - st0.top - cur.y) / cur.zoom })
+    const whole = (b: any) => b.x >= R.x - 0.5 && b.y >= R.y - 0.5 && b.x2 <= R.x2 + 0.5 && b.y2 <= R.y2 + 0.5
+    const mark = (el: Element, out: boolean) => (out ? el.setAttribute('data-atlas-out', '') : el.removeAttribute('data-atlas-out'))
+    for (const el of sr.querySelectorAll('.react-flow__node')) {
+      const r = el.getBoundingClientRect()
+      if (r.width > 0) mark(el, !whole(flow(r)))
+    }
+    const edgeOut = new Map<string, boolean>()
+    for (const el of sr.querySelectorAll<SVGGraphicsElement>('.react-flow__edge')) {
+      let out = true
+      try {
+        const b = el.getBBox() // the edges' svg sits in the viewport transform: user space = flow
+        out = !whole({ x: b.x, y: b.y, x2: b.x + b.width, y2: b.y + b.height })
+      } catch {
+        /* not rendered */
+      }
+      edgeOut.set(el.getAttribute('data-id') ?? '', out)
+      mark(el, out)
+    }
+    // a label goes with its edge (matched by its layout position), and on its own when it is cut
+    const centres = (v?.edges ?? [])
+      .filter((e: any) => e.labelBBox?.width > 0)
+      .map((e: any) => ({ id: e.id, x: e.labelBBox.x + e.labelBBox.width / 2, y: e.labelBBox.y + e.labelBBox.height / 2 }))
+    for (const el of sr.querySelectorAll('.likec4-edge-label-container')) {
+      const lab = el.querySelector('.likec4-edge-label') ?? el
+      const r = lab.getBoundingClientRect()
+      if (!(r.width > 0)) continue
+      const b = flow(r)
+      const cx = (b.x + b.x2) / 2
+      const cy = (b.y + b.y2) / 2
+      const near = centres.sort((a: any, c: any) => Math.hypot(a.x - cx, a.y - cy) - Math.hypot(c.x - cx, c.y - cy))[0]
+      const edgeGone = near && Math.hypot(near.x - cx, near.y - cy) < 48 && edgeOut.get(near.id) === true
+      mark(el, edgeGone || !whole(b))
+    }
+    culledAt.current.set(key, `${Math.round(vp.x)},${Math.round(vp.y)},${vp.zoom.toFixed(4)}`)
   }
 
   // hierarchy: the view holding a node that drills into it → a tour `via` → the scope parent
@@ -313,7 +366,10 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
         const h = handles.current.get(st.current.active)
         const v = views.get(currentView())
         ownMove.current = !!ms
-        if (h?.xyflow && v) void h.xyflow.setViewport(fitBox(v.bounds, legible ? safeRect(canvasSize(), insets()) : fullRect(), legible ? 0 : pad), ms ? { duration: ms } : undefined)
+        if (!h?.xyflow || !v) return
+        const vp = fitBox(v.bounds, legible ? safeRect(canvasSize(), insets()) : fullRect(), legible ? 0 : pad)
+        void h.xyflow.setViewport(vp, ms ? { duration: ms } : undefined)
+        if (!ms) cull(st.current.active, vp)
       },
       frame: (ms = 450) => {
         const h = handles.current.get(st.current.active)
@@ -321,6 +377,7 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
         const vp = vpFor(currentView(), st.current.active, aimRef.current)
         ownMove.current = !!ms
         void h.xyflow.setViewport(vp, ms ? { duration: ms } : undefined)
+        if (!ms) cull(st.current.active, vp)
       },
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -341,9 +398,12 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
   }
   const visRef = useRef(visDispatch)
   visRef.current = visDispatch
+  const cullRef = useRef(cull)
+  cullRef.current = cull
   useEffect(() => {
     if (!legible) return
     let last = 0
+    let lastVp = ''
     const id = window.setInterval(() => {
       const key = st.current.active
       const z = handles.current.get(key)?.xyflow?.getViewport?.().zoom
@@ -351,6 +411,14 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
       const settled = Math.abs(z - last) < 1e-4 // the gesture / move has come to rest
       last = z
       visRef.current(key, currentView(), { type: 'live', zoom: z, now: performance.now(), settled })
+      // at rest (and no programmatic move under way): re-cull for where the camera actually is —
+      // a user pan / zoom, an instant move, a re-render
+      const vp = handles.current.get(key)?.xyflow?.getViewport?.()
+      if (vp && settled && performance.now() > moveUntil.current) {
+        const sig = `${Math.round(vp.x)},${Math.round(vp.y)},${vp.zoom.toFixed(4)}`
+        if (lastVp === sig) cullRef.current(key, vp)
+        lastVp = sig
+      }
     }, 120)
     return () => window.clearInterval(id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -370,6 +438,9 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
       `.likec4-element-node-data [data-likec4-node-description]{display:-webkit-box !important;${collapse(!!v?.hideDesc, '8rem')}}`,
       `.likec4-element-node-data [data-likec4-node-technology]{display:block !important;${collapse(!!v?.hideDesc, '4em')}}`,
       `.likec4-edge-label-container{${hide(!!v?.hideEdgeLabels)}}`,
+      // culled (wholly or partly outside the safe rect): faded out, same timing as the text
+      `.react-flow__node,.react-flow__edge{transition:opacity ${fadeMs}ms ease}`,
+      `.react-flow__node[data-atlas-out],.react-flow__edge[data-atlas-out],.likec4-edge-label-container.likec4-edge-label-container[data-atlas-out]{opacity:0 !important;pointer-events:none !important;transition:opacity ${fadeMs}ms ease !important}`,
       // hidden small text comes back on the node that has keyboard focus or is selected (and the
       // node's accessible name always carries its description)
       '.react-flow__node:focus-visible [data-likec4-node-description],.react-flow__node:focus-visible [data-likec4-node-technology],.react-flow__node.selected [data-likec4-node-description],.react-flow__node.selected [data-likec4-node-technology]{opacity:1 !important;max-height:8rem !important}',
@@ -432,7 +503,11 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
                 handles.current.set(l.key, { ...h, diagram, xyflow })
                 patchCamera(
                   diagram,
-                  (zoom: number, ms: number) => visRef.current(l.key, l.viewId, { type: 'target', zoom, until: performance.now() + ms + 80 }),
+                  (zoom: number, ms: number, vp?: any) => {
+                    moveUntil.current = Math.max(moveUntil.current, performance.now() + ms + 80)
+                    visRef.current(l.key, l.viewId, { type: 'target', zoom, until: performance.now() + ms + 80 })
+                    if (vp) cullRef.current(l.key, vp)
+                  },
                   legible
                     ? (vp: any) => {
                         if (ownMove.current) {
@@ -455,6 +530,7 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
                   const vp = vpFor(l.viewId, l.key)
                   void xyflow.setViewport(vp)
                   visRef.current(l.key, l.viewId, { type: 'target', zoom: vp.zoom, until: 0 })
+                  requestAnimationFrame(() => cullRef.current(l.key, vp))
                 }
                 readyOf(l.key).resolve()
                 firstReady.current.resolve()

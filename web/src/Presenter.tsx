@@ -162,6 +162,9 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
     }
   }, [data])
 
+  // a slide asked for mid-transition (End, a quick →) isn't dropped: the latest one runs next
+  const pendingGoto = useRef<number | null>(null)
+  const gotoRef = useRef<(i: number) => Promise<void>>(async () => {})
   const run = useCallback(async (fn: () => Promise<void>) => {
     if (busy.current) return
     busy.current = true
@@ -172,6 +175,9 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
     } finally {
       busy.current = false
     }
+    const next = pendingGoto.current
+    pendingGoto.current = null
+    if (next != null) await gotoRef.current(next)
   }, [])
 
   const showSlide = useCallback(
@@ -186,8 +192,12 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
   )
 
   const gotoSlide = useCallback(
-    (i: number) =>
-      run(async () => {
+    async (i: number) => {
+      if (busy.current) {
+        pendingGoto.current = i
+        return
+      }
+      await run(async () => {
         if (i < 0 || i >= tour.length) return
         st.current = { ...st.current, slide: i }
         setSlide(i)
@@ -195,9 +205,11 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
         setAdhoc(null)
         await showSlide(tour[i])
         if (st.current.slide === i) setNoteSlide(i) // the caption changes when the camera arrives
-      }),
+      })
+    },
     [run, tour, showSlide],
   )
+  gotoRef.current = gotoSlide
 
   // first slide's focus/step once the first layer is up
   useEffect(() => {
