@@ -105,3 +105,43 @@ test('legibleFlags', () => {
   assert.deepEqual(legibleFlags(1, 0.4), { hideDesc: true, hideEdgeLabels: true })
   assert.deepEqual(legibleFlags(1.6, 0.9), { hideDesc: false, hideEdgeLabels: false })
 })
+
+import { textVisFor, visInit, visReduce } from '../src/logic.mjs'
+
+test('text visibility: decided from the TARGET zoom, frozen during the move, hysteresis for live zoom', () => {
+  const ke = 1.6
+  // the destination decides, before the move — a zoom-in to 1.0 shows descriptions from frame 1
+  let s = visInit(ke, 0.4)
+  assert.deepEqual([s.hideDesc, s.hideEdgeLabels], [true, false])
+  s = visReduce(s, { type: 'target', ke, zoom: 1.0, until: Infinity })
+  assert.deepEqual([s.hideDesc, s.fade], [false, false])
+  // mid-move the camera passes through small zooms: nothing changes while frozen
+  for (const z of [0.45, 0.5, 0.7, 0.9]) assert.equal(visReduce(s, { type: 'live', ke, zoom: z, now: 1, settled: true }), s)
+  s = visReduce(s, { type: 'release', now: 10 })
+  assert.equal(s.frozenUntil, 10)
+  // a zoom-OUT move decides "hidden" up front — descriptions never flash on the way out either
+  const out = visReduce(s, { type: 'target', ke, zoom: 0.4, until: 500 })
+  assert.equal(out.hideDesc, true)
+  assert.equal(visReduce(out, { type: 'live', ke, zoom: 0.9, now: 100, settled: true }), out, 'frozen until 500')
+  // a parent layer of a synced transition just keeps what it had
+  const parent = visReduce(visInit(ke, 0.4), { type: 'freeze' })
+  assert.equal(visReduce(parent, { type: 'live', ke, zoom: 2, now: 1e9, settled: true }), parent)
+})
+
+test('live (user) zoom: settled only, hysteresis, fades', () => {
+  const ke = 1
+  let s = visInit(ke, 0.5) // desc 7.1 px → hidden
+  assert.equal(s.hideDesc, true)
+  assert.equal(visReduce(s, { type: 'live', ke, zoom: 0.7, now: 1, settled: false }), s, 'mid-gesture: no change')
+  // 9 px needs zoom ≥ .633 to hide→show… plus 10 % hysteresis → ≥ .697
+  assert.equal(visReduce(s, { type: 'live', ke, zoom: 0.66, now: 1, settled: true }).hideDesc, true)
+  s = visReduce(s, { type: 'live', ke, zoom: 0.72, now: 1, settled: true })
+  assert.deepEqual([s.hideDesc, s.fade], [false, true])
+  // shown → hides only below the plain threshold (.633)
+  assert.equal(visReduce(s, { type: 'live', ke, zoom: 0.65, now: 2, settled: true }), s)
+  assert.equal(visReduce(s, { type: 'live', ke, zoom: 0.6, now: 2, settled: true }).hideDesc, true)
+})
+
+test('textVisFor at the exact legible threshold stays shown (float noise)', () => {
+  assert.equal(textVisFor(9 / (14 * 0.39), 0.39).hideEdgeLabels, false)
+})

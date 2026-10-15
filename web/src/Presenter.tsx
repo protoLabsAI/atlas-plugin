@@ -381,6 +381,7 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
         pad={PAD}
         layerProps={LAYER_PROPS}
         legible
+        reserveBottom={showNotes ? (record ? 0.24 : 150) : 0}
         onNavigateTo={(_to, el) => el && drill(el.id)}
         onNodeClick={(n) => setFocused(n.id)}
         onSettled={(v) => setView(v)}

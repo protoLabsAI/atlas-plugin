@@ -789,3 +789,47 @@ export function legibleFlags(ke, zoom, t = LEGIBLE) {
     hideEdgeLabels: LIKEC4_EDGE_PX * ke * zoom < t.edge - 0.05,
   }
 }
+
+// ---------------------------------------------------------------- small-text visibility (present / record)
+// Decided from the camera's TARGET zoom for programmatic moves (transitions, fits, focus,
+// walkthrough steps) and frozen while they run — so nothing pops in and out mid-zoom; only a
+// settled USER zoom (wheel / pinch) is evaluated live, with hysteresis and a short fade.
+export const VIS_HYSTERESIS = 1.1
+const EPS = 0.05
+
+/** Which small text is hidden at `zoom` (`prev` → hysteresis: hidden text needs +10% to come back). */
+export function textVisFor(ke, zoom, prev, t = LEGIBLE) {
+  const desc = LIKEC4_TITLE_PX * LIKEC4_DESC_RATIO * zoom
+  const edge = LIKEC4_EDGE_PX * ke * zoom
+  const hidden = (size, thr, was) => (was ? size < thr * VIS_HYSTERESIS - EPS : size < thr - EPS)
+  return { hideDesc: hidden(desc, t.desc, prev?.hideDesc), hideEdgeLabels: hidden(edge, t.edge, prev?.hideEdgeLabels) }
+}
+
+/** The initial visibility state of a layer. */
+export const visInit = (ke, zoom) => ({ ...textVisFor(ke, zoom), frozenUntil: 0, fade: false })
+
+/**
+ * Visibility reducer. Events:
+ *  {type:'target', ke, zoom, until} — a programmatic move is starting toward `zoom`: decide from
+ *    the destination (no hysteresis, no fade) and freeze until `until` (ms timestamp; Infinity = until 'release').
+ *  {type:'freeze'} — keep the current state until 'release' (the parent layer of a zoom transition).
+ *  {type:'release', now} — the move ended.
+ *  {type:'live', ke, zoom, now, settled} — the observed zoom; ignored while frozen or mid-gesture.
+ */
+export function visReduce(s, e) {
+  switch (e.type) {
+    case 'target':
+      return { ...textVisFor(e.ke, e.zoom), frozenUntil: e.until ?? Infinity, fade: false }
+    case 'freeze':
+      return { ...s, frozenUntil: Infinity }
+    case 'release':
+      return s.frozenUntil ? { ...s, frozenUntil: Math.min(s.frozenUntil, e.now ?? 0) } : s
+    case 'live': {
+      if (!e.settled || (e.now ?? 0) < s.frozenUntil) return s
+      const next = textVisFor(e.ke, e.zoom, s)
+      if (next.hideDesc === s.hideDesc && next.hideEdgeLabels === s.hideEdgeLabels) return s
+      return { ...next, frozenUntil: 0, fade: true }
+    }
+  }
+  return s
+}
