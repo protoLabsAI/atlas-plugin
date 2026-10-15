@@ -134,7 +134,21 @@ border: 1px solid var(--a-accent); transform: rotate(45deg) }
 .callout__body p { margin: 0 } .callout__body p + p { margin-top: 4px }
 .callout__close { position: absolute; top: 4px; right: 4px }
 @media (prefers-reduced-motion: no-preference) { .callout { animation: atlas-callout-in var(--pl-motion-base, 200ms) var(--pl-motion-ease, ease-out) } }
-@keyframes atlas-callout-in { from { opacity: 0; transform: translateY(4px) } to { opacity: 1; transform: none } }</style>
+@keyframes atlas-callout-in { from { opacity: 0; transform: translateY(4px) } to { opacity: 1; transform: none } }
+.present-group { position: relative; display: flex; gap: 2px; flex: 0 0 auto }
+.tour-menu { position: absolute; right: 0; top: 32px; z-index: 30; min-width: 240px; max-height: 70vh; overflow: auto; padding: 4px;
+background: var(--a-raised); border: 1px solid var(--a-border); border-radius: var(--pl-radius-md, 8px); box-shadow: var(--a-shadow) }
+.tour-menu .pl-menu__item { display: block; width: 100%; text-align: left; background: none; border: 0; padding: 6px 10px; border-radius: 5px; cursor: pointer; font-size: 12px }
+.tour-menu .pl-menu__item:hover, .tour-menu .pl-menu__item:focus-visible { background: var(--a-hover) }
+.tour-menu .pl-menu__group-label { padding: 6px 10px 2px; font-size: 11px; color: var(--a-muted) }
+.tour-menu .pl-menu__sep { height: 1px; margin: 4px 0; background: var(--a-border) }
+.atlas-record, .atlas-record * { cursor: none !important }
+.presenter--record .stage { pointer-events: none }
+.presenter--record .notes { bottom: 6%; width: min(1100px, calc(100% - 64px)); padding: 14px 24px; text-align: center;
+background: color-mix(in srgb, var(--pl-color-bg, #0a0a0c) 82%, transparent); border-color: transparent; box-shadow: none }
+.presenter--record .notes-body { font-size: clamp(18px, 2.4vw, 28px); line-height: 1.35; font-weight: var(--pl-font-weight-medium, 500); margin: 0 }
+.presenter--record .p-crumbs { font-size: 15px }
+.atlas-record .banner.compact { display: none }</style>
 <script>
   // RULE 3 - slug-aware base: "" on the host window, "/agents/<slug>" through the fleet proxy.
   var BASE = location.pathname.split("/plugins/")[0];
@@ -146,7 +160,7 @@ border: 1px solid var(--a-accent); transform: rotate(45deg) }
     document.head.insertBefore(l, document.head.querySelector("style"));
     // The viewer bundle, BASE-prefixed (the page URL has no trailing slash, so no relative URLs).
     var s = document.createElement("script");
-    s.type = "module"; s.src = BASE + "/plugins/atlas/static/assets/atlas-DQWYLM--.js";
+    s.type = "module"; s.src = BASE + "/plugins/atlas/static/assets/atlas-D6F08-DV.js";
     s.onerror = function () {
       var b = document.getElementById("boot");
       if (b) b.textContent = "Atlas could not load its viewer bundle (" + s.src + ").";

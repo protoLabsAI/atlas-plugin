@@ -205,7 +205,7 @@ def test_viewer_state_and_describe_current():
 async def test_tools_current_next_and_clear(stub, registry):
     state = N.ViewerState()
     tools = {t.name: t for t in build_tools(stub, registry, state)}
-    assert set(tools) == {"atlas_validate", "atlas_describe", "atlas_show", "atlas_clear"}
+    assert set(tools) == {"atlas_validate", "atlas_describe", "atlas_show", "atlas_clear", "atlas_record_script"}
     state.update({"view": "turn", "step": 1, "selected": "app.api"})
     cur = await tools["atlas_describe"].ainvoke({"current": True})
     assert "Selected element: app.api (API Server)" in cur

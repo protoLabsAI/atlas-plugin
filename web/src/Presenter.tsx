@@ -3,12 +3,12 @@
 // Tab focus · 1–9 jump · N notes · F fullscreen · [ ] slower/faster.
 import type { LikeC4Model } from '@likec4/core/model'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { cycle, dynamicSteps, mdLight, presenterKey } from './logic.mjs'
+import { FINAL_HOLD_MS, cycle, dynamicSteps, mdLight, presenterKey, slideDwellMs, stepDwellMs } from './logic.mjs'
 import { applyHighlight, clearHighlight } from './highlight'
 import { getSpeed, onSpeed, stepSpeed } from './motion'
 import { Stage, type StageHandle } from './Stage'
 
-export type Slide = { view: string; focus?: string | string[]; edges?: string[]; step?: number; via?: string; note?: string }
+export type Slide = { view: string; focus?: string | string[]; edges?: string[]; step?: number; via?: string; note?: string; hold_ms?: number }
 export type Tour = { id: string; title: string; slides: Slide[]; auto?: boolean }
 export type PresenterCmd = { seq: number; slide?: number; adhoc?: Slide }
 
@@ -42,9 +42,14 @@ type Props = {
   onNoteClick?: (e: React.MouseEvent | React.KeyboardEvent) => void
   /** what's on screen (for atlas.viewing / Ask) */
   onState?: (s: { view: string; slide: number; step: number | null }) => void
+  /** play the tour by itself (dwell per slide from hold_ms / the note), then onDone */
+  autoplay?: boolean
+  /** recording: caption-style notes, no chrome, no hover states */
+  record?: boolean
+  onDone?: () => void
 }
 
-export function Presenter({ model, data, tours, tourId, start, cmd, scheme, themeCss, onTour, onExit, onNoteClick, onState }: Props) {
+export function Presenter({ model, data, tours, tourId, start, cmd, scheme, themeCss, onTour, onExit, onNoteClick, onState, autoplay, record, onDone }: Props) {
   const tour = (tours.find((t) => t.id === tourId) ?? tours[0]).slides
   const first = Math.min(Math.max(start, 0), tour.length - 1)
   const stage = useRef<StageHandle>(null)
@@ -56,6 +61,9 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
   const [adhoc, setAdhoc] = useState<Slide | null>(null)
   const [toast, setToast] = useState<string | null>(null)
   const busy = useRef(false)
+  const manual = useRef(false)
+  const [done, setDone] = useState(false)
+  const [noteSlide, setNoteSlide] = useState(first)
   const st = useRef({ slide, focused, walk })
   st.current = { slide, focused, walk }
 
@@ -128,6 +136,7 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
         setSlide(i)
         setAdhoc(null)
         await showSlide(tour[i])
+        if (st.current.slide === i) setNoteSlide(i) // the caption changes when the camera arrives
       }),
     [run, tour, showSlide],
   )
@@ -172,6 +181,7 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
       for (const i of [cur + d * dir, cur - d * dir])
         if (tour[i]?.view === v && !tour[i].step) {
           st.current = { ...st.current, slide: i }
+          setNoteSlide(i)
           return setSlide(i)
         }
   }
@@ -244,8 +254,57 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
   useEffect(() => onSpeed((s) => flash(`Transitions: ${s}`)) as any, [])
 
   const shown = adhoc ?? tour[slide]
+  const captioned = adhoc ?? tour[noteSlide] ?? shown // notes follow the camera, not the keypress
   const shownView = data?.views?.[shown.view]
   const wholeDynamic = !shown.step && shownView?._type === 'dynamic' ? dynamicSteps(shownView).length : 0
+
+  // ------------------------------------------------------------ autoplay (record mode)
+  useEffect(() => {
+    if (!autoplay) return
+    let live = true
+    const idle = async () => {
+      while (live && (busy.current || stage.current?.busy())) await sleep(50)
+    }
+    const dwell = async (ms: number) => {
+      const t0 = performance.now()
+      while (live && !manual.current && performance.now() - t0 < ms) await sleep(50)
+    }
+    const play = async () => {
+      try {
+        await (document as any).fonts?.ready
+      } catch {
+        /* no font loading API */
+      }
+      await stage.current?.ready()
+      await sleep(600)
+      for (let i = first; i < tour.length; i++) {
+        if (!live || manual.current) return
+        await idle()
+        if (i !== st.current.slide) await gotoSlide(i)
+        await idle()
+        await dwell(slideDwellMs(tour[i]))
+        const v = data?.views?.[tour[i].view]
+        if (v?._type === 'dynamic' && !tour[i].step) {
+          for (const [n, e] of dynamicSteps(v).entries()) {
+            if (!live || manual.current) return
+            walkTo(n + 1)
+            await dwell(stepDwellMs(e.label))
+          }
+        }
+      }
+      if (!live || manual.current) return
+      await dwell(FINAL_HOLD_MS)
+      if (live && !manual.current) {
+        setDone(true)
+        onDone?.()
+      }
+    }
+    void play()
+    return () => {
+      live = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoplay])
 
   // ------------------------------------------------------------ keyboard
   useEffect(() => {
@@ -260,6 +319,7 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
       }
       const a = presenterKey(e.key, e, { slide: st.current.slide, count: tour.length, steps: busy.current ? 0 : wholeDynamic, step: st.current.walk }) as any
       if (!a) return
+      if (!record) manual.current = true // the presenter took over: autoplay yields
       // capture phase on window: keeps LikeC4's own hotkeys (arrows in walkthrough, Esc) from double-firing
       e.preventDefault()
       e.stopImmediatePropagation()
@@ -309,7 +369,7 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
 
   const crumbs = stage.current ? stage.current.chain(view) : [view]
   return (
-    <div className="presenter" data-scheme={scheme}>
+    <div className={`presenter${record ? ' presenter--record' : ''}`} data-scheme={scheme} data-atlas-slide={slide + 1} data-atlas-done={done ? '' : undefined}>
       <Stage
         ref={stage}
         model={model}
@@ -332,6 +392,7 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
         ))}
         {focused && <em className="focus">· {data?.elements?.[focused]?.title ?? focused}</em>}
       </nav>
+      {!record && (
       <div className="p-top">
         {tours.length > 1 && (
           <select className="p-tour pl-select" aria-label="Tour" value={tourId} onChange={(e) => onTour(e.target.value)}>
@@ -349,21 +410,24 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
           ×
         </button>
       </div>
+      )}
       {showNotes && (
         <aside className="notes" aria-live="polite">
+          {!record && (
           <div className="notes-head">
             {tours.find((t) => t.id === tourId)?.title ?? 'Tour'} · slide {slide + 1}
             {shown.step ? ` · step ${shown.step}` : walk ? ` · step ${walk}/${wholeDynamic}` : ''}
           </div>
-          {shown.note ? (
-            <div className="notes-body" onClick={onNoteClick} onKeyDown={onNoteClick} dangerouslySetInnerHTML={{ __html: mdLight(shown.note, { codeRefs: true }) }} />
-          ) : (
-            <div className="notes-body muted">{shownView?.title ?? shown.view}</div>
           )}
-          <div className="keys">→ ← slides · Enter drill · Esc up · Tab focus · 1–9 jump · N notes · F fullscreen · [ ] speed</div>
+          {captioned.note ? (
+            <div className="notes-body" onClick={onNoteClick} onKeyDown={onNoteClick} dangerouslySetInnerHTML={{ __html: mdLight(captioned.note, { codeRefs: true }) }} />
+          ) : (
+            <div className="notes-body muted">{data?.views?.[captioned.view]?.title ?? captioned.view}</div>
+          )}
+          {!record && <div className="keys">→ ← slides · Enter drill · Esc up · Tab focus · 1–9 jump · N notes · F fullscreen · [ ] speed</div>}
         </aside>
       )}
-      {toast && <div className="toast p-toast">{toast}</div>}
+      {toast && !record && <div className="toast p-toast">{toast}</div>}
     </div>
   )
 }

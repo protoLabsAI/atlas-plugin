@@ -13,6 +13,7 @@ from langchain_core.tools import tool
 
 from . import lint as L
 from . import nav as N
+from . import record as R
 
 MAX_LIST = 60  # nodes / edges / findings echoed per answer
 
@@ -319,9 +320,52 @@ def build_tools(service, registry, state: N.ViewerState | None = None):
         return describe_show(event, model or {})
 
     @tool
+    async def atlas_record_script(
+        tour: str,
+        base_url: str = "",
+        color_scheme: str = "dark",
+        viewport: str = "1280x800",
+        bearer_env: str = "",
+    ) -> str:
+        """Write a screen-recording shot script (Campaign Studio's YAML format) that records an
+        Atlas tour as one continuous walkthrough: open the console, open the Atlas view, start
+        the tour in record mode (autoplay, caption-style notes, no chrome), wait for it to end.
+        tour: a tour id from atlas_describe ("auto" always exists). base_url: the console's URL
+        (e.g. http://localhost:7870). color_scheme: dark | light. viewport: WIDTHxHEIGHT.
+        bearer_env: the NAME of an env var holding the console token, if it needs one.
+        Returns the YAML plus the expected duration — hand it to the recorder unchanged."""
+
+        def build() -> str:
+            payload, model = service.current()
+            if not model:
+                return "Nothing to record: " + (payload.get("errors") or [{"message": "no model"}])[0]["message"]
+            speed = "normal"
+            try:
+                from .api import transition_speed
+
+                speed = transition_speed(service.conf())
+            except Exception:  # noqa: BLE001 — a stub service in tests
+                pass
+            text, ms, why = R.shot_script(
+                model,
+                service.current_tours(),
+                tour.strip(),
+                base_url=base_url.strip(),
+                color_scheme=color_scheme.strip().lower(),
+                viewport=viewport,
+                speed=speed,
+                bearer_env=bearer_env.strip(),
+            )
+            if text is None:
+                return f"Can't write the script: {why}"
+            return f"Shot script for tour {tour} — about {round(ms / 1000)} s of footage between mark start and mark end:\n\n```yaml\n{text}```"
+
+        return await asyncio.to_thread(build)
+
+    @tool
     async def atlas_clear() -> str:
         """Remove Atlas highlights and callouts (the view itself stays where it is)."""
         registry.emit("atlas.clear", {})
         return "Cleared the Atlas highlights."
 
-    return [atlas_validate, atlas_describe, atlas_show, atlas_clear]
+    return [atlas_validate, atlas_describe, atlas_show, atlas_clear, atlas_record_script]

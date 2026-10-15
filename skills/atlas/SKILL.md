@@ -357,6 +357,19 @@ Ids are element fqns (`atlas_describe`); a unique title also works, and a miss s
 `atlas_show(element="proto_agent.platform.scheduler", focus=["proto_agent.platform.scheduler", "proto_agent.platform.state"], note="Jobs persist in SQLite.")`
 → two sentences → `show_code(...)` on its entry point.
 
+## 9c. Recording a walkthrough
+
+To record a tour (for a launch video or the docs), call `atlas_record_script(tour="overview",
+base_url="http://localhost:7870")`. It returns a shot script (YAML) and the expected duration; hand
+the YAML to the recorder (Campaign Studio's `shotscript`) unchanged. Before you record:
+
+- Run `atlas_validate`. The script refuses a tour with broken slides.
+- Write notes for **reading**. Each slide stays up for its note's reading time (about 260 ms a word,
+  2.5–15 s) after the camera settles. Set `"hold_ms": 6000` on a slide that needs longer.
+- A slide that shows a whole dynamic view (no `step`) walks every step by itself, which is good
+  footage for a flow.
+- Keep notes short (one or two sentences). In record mode they become large on-screen captions.
+
 ## 10. Common mistakes (real 1.60.0 errors)
 
 Each one was reproduced against likec4 1.60.0.

@@ -182,7 +182,7 @@ await mock('pane=1')
   await page.evaluate(() => window.emit('atlas.show', { view: 'proto_agent_detail', focus: 'proto_agent.graph' }))
   await wait(3500)
   const s4 = await state(frame)
-  check('atlas.show (explore + focus) from the bus', s4.mode === 'explore' && s4.view === 'proto_agent_detail' && s4.selected === 'proto_agent.graph', JSON.stringify(s4))
+  check('atlas.show (explore + focus) from the bus → live highlight', s4.mode === 'explore' && s4.view === 'proto_agent_detail' && s4.highlight?.focus?.[0] === 'proto_agent.graph', JSON.stringify(s4.highlight))
   await shot(page, '15-bus-show-focus')
   // bus: atlas.show tour auto, slide 2, present
   await page.evaluate(() => window.emit('atlas.show', { tour: 'overview', slide: 4, present: true }))

@@ -8,7 +8,8 @@ Rules (each finding is ``{rule, message, view?, element?, tour?}``):
   ``code-link-outside`` — a file link that escapes the project root;
 * ``sequence-nesting`` — a ``variant sequence`` dynamic view using both an element and one of its
   descendants (LikeC4 silently drops those steps);
-* ``tour-*`` — tours naming an unknown view / element, a step out of range, or a malformed file;
+* ``tour-*`` — tours naming an unknown view / element, a step out of range, a ``hold_ms`` outside
+  500–60000, or a malformed file;
 * ``empty-view`` — a view with no nodes;
 * ``busy-view`` — a view with more than ``MAX_VIEW_NODES`` nodes (unreadable in the console panel —
   group the elements into sub-systems with their own scoped views).
@@ -23,6 +24,7 @@ from pathlib import Path
 TOURS_FILE = "atlas.tours.json"
 _STEP_ID = re.compile(r"^step-(\d+)")
 MAX_VIEW_NODES = 12
+HOLD_MIN_MS, HOLD_MAX_MS = 500, 60_000  # a tour slide's optional `hold_ms` (autoplay / recording dwell)
 
 
 # ── model helpers ───────────────────────────────────────────────────────────────────────────
@@ -244,6 +246,11 @@ def check_slide(model: dict, slide: dict) -> list[str]:
     view = vs.get(vid)
     if view is None:
         return [f"unknown view {vid!r}"]
+    hold = slide.get("hold_ms")
+    if hold is not None and (
+        isinstance(hold, bool) or not isinstance(hold, int) or not HOLD_MIN_MS <= hold <= HOLD_MAX_MS
+    ):
+        problems.append(f"hold_ms {hold!r} must be an integer between {HOLD_MIN_MS} and {HOLD_MAX_MS} (milliseconds)")
     for key in ("focus", "via"):
         fqn = slide.get(key)
         if fqn is not None and fqn not in elements(model):

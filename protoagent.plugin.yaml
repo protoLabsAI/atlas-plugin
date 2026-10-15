@@ -5,10 +5,11 @@ description: >-
   Drill-down architecture diagrams you can explore and present. Atlas renders a
   project's LikeC4 model (a directory of .c4 files, default <project>/architecture/)
   as a console view: click an element to drill into it, follow code links into the
-  console's code pane, and run guided tours in presenter mode. The agent gets four
-  tools (atlas_validate, atlas_describe, atlas_show, atlas_clear) to check the model
-  and narrate it live — show an element, highlight nodes and relationship paths, pin
-  a callout, step through flows, and see what the operator is looking at — and a
+  console's code pane, and run guided tours in presenter mode — or autoplay one as a
+  recordable walkthrough. The agent gets five tools (atlas_validate, atlas_describe,
+  atlas_show, atlas_clear, atlas_record_script) to check the model, narrate it live —
+  show an element, highlight nodes and relationship paths, pin a callout, step through
+  flows, see what the operator is looking at — and script a screen recording; plus a
   skill for authoring the model. Layout runs in a vendored, offline engine that needs Node.js 20 or newer —
   the one on PATH, or protoAgent's managed Node runtime (one click from the setup
   banner).

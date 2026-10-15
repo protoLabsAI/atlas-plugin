@@ -9,7 +9,7 @@ import type { Highlight } from './highlight'
 import { setSpeed } from './motion'
 import { themeFor } from './theme'
 import {
-  askPrompt, codeOpenMessage, codeRoute, hostSupportsCompose, viewingPayload, displayFile, dynamicSteps, errorFileRel, keepView, keyCombo, nodeMenuItems, normaliseLinks,
+  askPrompt, codeOpenMessage, parseDeepLink, codeRoute, hostSupportsCompose, viewingPayload, displayFile, dynamicSteps, errorFileRel, keepView, keyCombo, nodeMenuItems, normaliseLinks,
   parseShow, resolveProject, scopedViewOf, searchModel, shouldForwardKey, slideForView, toursFor, viewChain, viewForElement, viewOptions,
 } from './logic.mjs'
 
@@ -148,7 +148,7 @@ function useAtlasData(kit: Kit) {
 }
 
 // ---------------------------------------------------------------- app
-type Mode = { kind: 'explore' } | { kind: 'present'; tour: string; start: number; nonce: number }
+type Mode = { kind: 'explore' } | { kind: 'present'; tour: string; start: number; nonce: number; autoplay?: boolean; record?: boolean; done?: boolean }
 
 export function App({ kit }: { kit: Kit }) {
   const { scheme, css: themeCss } = useScheme(kit)
@@ -163,6 +163,7 @@ export function App({ kit }: { kit: Kit }) {
   const [pcmd, setPcmd] = useState<PresenterCmd | null>(null)
   const [walk, setWalk] = useState<number | null>(null)
   const [highlight, setHighlight] = useState<Highlight | null>(null)
+  const [menuOpen, setMenuOpen] = useState(false)
   const [presenting, setPresenting] = useState<{ view: string; slide: number; step: number | null } | null>(null)
   const [query, setQuery] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
@@ -270,12 +271,13 @@ export function App({ kit }: { kit: Kit }) {
 
   // ---- presenter
   const present = useCallback(
-    (tourId?: string, start?: number) => {
+    (tourId?: string, start?: number, opts: { autoplay?: boolean; record?: boolean } = {}) => {
       if (!tours.length) return
       const t = tours.find((x) => x.id === tourId) ?? tours[0]
-      const s = typeof start === 'number' ? start : slideForView(t.slides, viewId ?? 'index')
+      const s = typeof start === 'number' ? start : opts.autoplay ? 0 : slideForView(t.slides, viewId ?? 'index')
       setSelected(null)
-      setMode({ kind: 'present', tour: t.id, start: s, nonce: ++seq.current })
+      setMenuOpen(false)
+      setMode({ kind: 'present', tour: t.id, start: s, nonce: ++seq.current, autoplay: !!opts.autoplay, record: !!opts.record })
     },
     [tours, viewId],
   )
@@ -470,6 +472,35 @@ export function App({ kit }: { kit: Kit }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [mode.kind, present])
 
+  // ---- stable hooks for recorders / tests: data-atlas-state | -slide | -view on <html>
+  const atlasState = !data ? 'loading' : mode.kind === 'present' ? (mode.done ? 'tour-done' : 'presenting') : 'ready'
+  useEffect(() => {
+    const r = document.documentElement
+    r.dataset.atlasState = atlasState
+    const v = mode.kind === 'present' ? presenting?.view : viewId
+    if (v) r.dataset.atlasView = v
+    if (mode.kind === 'present' && presenting) r.dataset.atlasSlide = String(presenting.slide + 1)
+    else delete r.dataset.atlasSlide
+    r.classList.toggle('atlas-record', mode.kind === 'present' && !!mode.record)
+  }, [atlasState, mode, presenting, viewId])
+
+  // ---- deep link: #tour=<id>&slide=<n>&present=1&autoplay=1&record=1  |  #view=<id>&focus=<fqn>&step=<n>
+  const linked = useRef(false)
+  useEffect(() => {
+    if (linked.current || !data || !tours.length) return
+    const link = parseDeepLink(location.hash) as any
+    if (!link) return
+    linked.current = true
+    if (link.tour) {
+      const t = tours.find((x) => x.id === link.tour)
+      if (!t) return showToast(`Unknown tour ${link.tour}`)
+      const start = Math.min(Math.max((link.slide ?? 1) - 1, 0), t.slides.length - 1)
+      if (link.present) present(t.id, start, { autoplay: link.autoplay, record: link.record })
+      return
+    }
+    showRef.current({ view: link.view, focus: link.focus, step: link.step, present: link.present })
+  }, [data, tours, present, showToast])
+
   // ---- test hook
   useEffect(() => {
     ;(window as any).__atlas = { view: viewId, mode: mode.kind, selected, walk, paneOn, highlight, viewing, canCompose, hash: resp?.hash, ok: resp?.ok, stale: resp?.stale, tours: tours.map((t) => [t.id, t.slides.length]), scheme, base: BASE, embedded }
@@ -524,6 +555,9 @@ export function App({ kit }: { kit: Kit }) {
           onExit={exitPresent}
           onNoteClick={onCodeRefClick}
           onState={setPresenting}
+          autoplay={mode.autoplay}
+          record={mode.record}
+          onDone={() => setMode((m) => (m.kind === 'present' ? { ...m, done: true } : m))}
         />
       </div>
     )
@@ -586,9 +620,33 @@ export function App({ kit }: { kit: Kit }) {
             </ul>
           )}
         </div>
-        <button className="pl-btn pl-btn--sm pl-btn--primary present-btn" onClick={() => present()} title="Present (P)">
-          ▶ Present
-        </button>
+        <div className="present-group">
+          <button className="pl-btn pl-btn--sm pl-btn--primary present-btn" onClick={() => present()} title="Present (P)">
+            ▶ Present
+          </button>
+          <button className="pl-btn pl-btn--sm pl-btn--icon" aria-label="Tour options" aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen((o) => !o)}>
+            ▾
+          </button>
+          {menuOpen && (
+            <div className="pl-menu tour-menu" role="menu" aria-label="Tours" onKeyDown={(e) => e.key === 'Escape' && setMenuOpen(false)}>
+              {tours.map((t, i) => (
+                <div key={t.id} role="group" aria-label={t.title}>
+                  {i > 0 && <div className="pl-menu__sep" role="separator" />}
+                  <div className="pl-menu__group-label">{t.title} · {t.slides.length} slides</div>
+                  <button role="menuitem" className="pl-menu__item" onClick={() => present(t.id, 0)}>
+                    {`Present — ${t.title}`}
+                  </button>
+                  <button role="menuitem" className="pl-menu__item" onClick={() => present(t.id, 0, { autoplay: true })}>
+                    {`Autoplay — ${t.title}`}
+                  </button>
+                  <button role="menuitem" className="pl-menu__item" onClick={() => present(t.id, 0, { autoplay: true, record: true })} title="Autoplay with caption-style notes and no controls — for screen recording">
+                    {`Record — ${t.title}`}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </header>
       {errors.length > 0 && <ErrorBanner errors={errors} info={resp} stale={!!resp?.stale} open={errorsOpen} setOpen={setErrorsOpen} onOpen={openErrorFile} />}
       {net && <div className="pl-banner pl-banner--warning banner">{net}</div>}

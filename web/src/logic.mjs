@@ -672,3 +672,45 @@ export function codeRoute(mods, paneOn) {
   if (mods && (mods.metaKey || mods.ctrlKey)) return 'editor'
   return paneOn === false ? 'editor' : 'pane'
 }
+
+// ---------------------------------------------------------------- autoplay / recording
+// The autoplay schedule. MUST match record.py (SLIDE_* / STEP_* / FINAL_HOLD_MS) — the
+// backend's shot script waits for the same timeline.
+export const MIN_SLIDE_MS = 2500
+export const SLIDE_BASE_MS = 1200
+export const PER_WORD_MS = 260
+export const MAX_SLIDE_MS = 15000
+export const MIN_STEP_MS = 1800
+export const STEP_BASE_MS = 1000
+export const FINAL_HOLD_MS = 3000
+
+export const words = (text) => (String(text ?? '').replace(/[*`_[\]()]/g, ' ').match(/\S+/g) ?? []).length
+
+/** How long a slide stays up (after its camera settles): `hold_ms`, else from the note's length. */
+export function slideDwellMs(slide) {
+  const hold = slide?.hold_ms
+  if (Number.isInteger(hold) && hold > 0) return hold
+  return Math.min(MAX_SLIDE_MS, Math.max(MIN_SLIDE_MS, SLIDE_BASE_MS + words(slide?.note) * PER_WORD_MS))
+}
+
+/** How long one walkthrough step of a whole-dynamic-view slide stays up. */
+export function stepDwellMs(label) {
+  return Math.min(MAX_SLIDE_MS, Math.max(MIN_STEP_MS, STEP_BASE_MS + words(label) * PER_WORD_MS))
+}
+
+/**
+ * A deep link in the page's hash: `#tour=<id>&slide=<n>&present=1&autoplay=1&record=1` or
+ * `#view=<id>&focus=<fqn>[,<fqn>]&step=<n>`. → {tour?, slide?, present, autoplay, record, view?, focus[], step?} | null
+ */
+export function parseDeepLink(hash) {
+  const raw = String(hash ?? '').replace(/^#/, '')
+  if (!raw || !/(^|&)(tour|view)=/.test(raw)) return null
+  const q = new URLSearchParams(raw)
+  const flag = (k) => ['1', 'true', 'yes', ''].includes(q.get(k) ?? 'no')
+  const int = (k) => (/^\d+$/.test(q.get(k) ?? '') ? Number(q.get(k)) : undefined)
+  const out = { present: flag('present') || flag('autoplay') || flag('record'), autoplay: flag('autoplay') || flag('record'), record: flag('record') }
+  if (q.get('tour')) ((out.tour = q.get('tour')), (out.slide = int('slide')))
+  if (q.get('view')) ((out.view = q.get('view')), (out.step = int('step')))
+  out.focus = (q.get('focus') ?? '').split(',').map((s) => s.trim()).filter(Boolean)
+  return out
+}

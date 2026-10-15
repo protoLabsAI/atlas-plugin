@@ -42,6 +42,7 @@ alongside the original url; `http(s)` links stay `{kind:"web", url}`.
              {"view": "chat_turn_flow", "step": 3, "note": "…"}]}]}
 ```
 `view` required; `focus` = element FQN to highlight; `step` = dynamic-view walkthrough step (1-based);
+`hold_ms` = autoplay/record dwell for the slide (500–60000; default from the note's length);
 `via` = node to zoom through when entering the view; `note` = speaker notes (markdown-light).
 With no tours file, the viewer derives an **auto-tour**: `index`, then each scoped view in model
 tree order, then each dynamic view.
@@ -89,6 +90,9 @@ memory (`registry.on`) for `atlas_describe(current=True)` and relative steps.
   close matches; a bad step lists every step. Writing the model is done with the normal filesystem
   tools, guided by the skill.
 * `atlas_clear()` — emit `atlas.clear`.
+* `atlas_record_script(tour, base_url="", color_scheme="dark", viewport="1280x800", bearer_env="")` — a
+  Campaign Studio shot script recording the tour in record mode (see README *Recording a
+  walkthrough*); timing model in `record.py`, mirrored by `web/src/logic.mjs`.
 
 ## Node resolution
 
