@@ -28,7 +28,11 @@ const PROJECT = arg('--project', '')  // '' → omit `project` so the viewer res
 const STATIC = resolve(here, '../../static')
 const ENGINE = resolve(here, '../../vendor/atlas-engine.mjs')
 const REAL_KIT = process.env.PROTOAGENT_DIR ? join(process.env.PROTOAGENT_DIR, 'apps/web/dist/_ds') : ''
-const KIT = process.argv.includes('--real-kit') && REAL_KIT && existsSync(REAL_KIT) ? REAL_KIT : join(here, 'kit')
+// the pinned @protolabsai/ui kit from node_modules (what a host serves at /_ds); --real-kit uses a
+// protoAgent checkout's build; dev/kit stubs only when neither exists
+const NPM_KIT = resolve(here, '../node_modules/@protolabsai/ui')
+const KIT = process.argv.includes('--real-kit') && REAL_KIT && existsSync(REAL_KIT) ? REAL_KIT : existsSync(join(NPM_KIT, 'dist/plugin-kit.css')) ? NPM_KIT : join(here, 'kit')
+const kitFile = (name) => (KIT === NPM_KIT ? join(KIT, name === 'plugin-kit.css' ? 'dist/plugin-kit.css' : 'src/plugin-kit.js') : join(KIT, name))
 const state = { scenario: 'normal', token: '', tours: true, pane: true }
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml' }
 
@@ -161,7 +165,7 @@ createServer(async (req, res) => {
       if (!f.startsWith(STATIC + '/') || !existsSync(f)) return send(res, 404, 'not found')
       return send(res, 200, await readFile(f), { 'Content-Type': TYPES[extname(f)] || 'application/octet-stream' })
     }
-    if (path === '/_ds/plugin-kit.css' || path === '/_ds/plugin-kit.js') return send(res, 200, await readFile(join(KIT, path.slice(5))), { 'Content-Type': TYPES[extname(path)] })
+    if (path === '/_ds/plugin-kit.css' || path === '/_ds/plugin-kit.js') return send(res, 200, await readFile(kitFile(path.slice(5))), { 'Content-Type': TYPES[extname(path)] })
     if (path.startsWith('/api/')) {
       if (state.token && req.headers.authorization !== `Bearer ${state.token}`) return json(res, 401, { detail: 'unauthorized' })
       if (path === '/api/runtime/status') return json(res, 200, { code_pane: { enabled: state.pane } })

@@ -35,6 +35,10 @@ export type StageHandle = {
   ready: () => Promise<void>
   /** ease the active layer's camera to its (legible) framing */
   frame: (ms?: number) => void
+  /** does the legible framing crop the current view (the whole view isn't on screen)? */
+  cropped: () => boolean
+  /** show the WHOLE current view, legibility aside (presenter "Fit all") */
+  fitAll: (ms?: number) => void
 }
 
 type Props = {
@@ -103,12 +107,21 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
   }
   const fitRect = (): Box => ({ x: 0, y: 0, ...stageSize() })
   /** the box to fit for a view: the whole view, or (legible) its densest legible window */
-  const frameOf = (viewId: string): Box => {
+  const frameOf = (viewId: string, key?: number): Box => {
     const v = views.get(viewId)
-    return legible ? (legibleFrame(v, stageSize(), pad) as any).box : v.bounds
+    const fixed = key != null ? layerScale.current.get(key)?.k : undefined
+    return legible ? (legibleFrame(v, stageSize(), pad, undefined, fixed) as any).box : v.bounds
   }
   const kOf = (viewId: string) => (legible ? (legibleFrame(views.get(viewId), stageSize(), pad) as any).k : 1)
   const keOf = (viewId: string) => (legible ? (legibleFrame(views.get(viewId), stageSize(), pad) as any).ke : 1)
+  // a layer's text scale is fixed when it mounts — a later stage/caption resize re-frames the
+  // camera but never resizes the text under the viewer's eyes
+  const layerScale = useRef(new Map<number, { k: number; ke: number }>())
+  const scaleOf = (key: number, viewId: string) => {
+    let v = layerScale.current.get(key)
+    if (!v) layerScale.current.set(key, (v = { k: kOf(viewId), ke: keOf(viewId) }))
+    return v
+  }
 
   // hierarchy: the view holding a node that drills into it → a tour `via` → the scope parent
   const parentOf = useCallback(
@@ -200,11 +213,11 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
       // small-text visibility: the arriving layer decides from its DESTINATION zoom from frame 1,
       // the leaving one keeps what it shows — nothing pops mid-zoom
       visRef.current(fromKey, srcView, { type: 'freeze' })
-      visRef.current(toKey, target, { type: 'target', zoom: fitBox(frameOf(target), fitRect(), pad).zoom, until: Infinity })
+      visRef.current(toKey, target, { type: 'target', zoom: fitBox(frameOf(target, toKey), fitRect(), pad).zoom, until: Infinity })
       elA.style.willChange = elB.style.willChange = 'opacity' // composited only while fading
 
       if (kind === 'fade') {
-        const vpB = fitBox(frameOf(target), fitRect(), pad)
+        const vpB = fitBox(frameOf(target, toKey), fitRect(), pad)
         await animate(still ? 160 : FADE_MS * factor(), (t) => {
           if (!still) B.xyflow.setViewport({ ...vpB, zoom: vpB.zoom * lerp(0.94, 1, t), x: lerp(W / 2 - (W / 2 - vpB.x) * 0.94, vpB.x, t), y: lerp(H / 2 - (H / 2 - vpB.y) * 0.94, vpB.y, t) })
           elA.style.opacity = String(1 - t)
@@ -216,8 +229,8 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
         const parentId = kind === 'in' ? srcView : target
         const childId = kind === 'in' ? target : srcView
         const node = views.get(parentId).nodes.find((n: any) => n.id === portal) as Box
-        const childBounds = frameOf(childId)
-        const vpP0 = kind === 'in' ? A.xyflow.getViewport() : fitBox(frameOf(parentId), fitRect(), pad)
+        const childBounds = frameOf(childId, kind === 'in' ? toKey : fromKey)
+        const vpP0 = kind === 'in' ? A.xyflow.getViewport() : fitBox(frameOf(parentId, kind === 'in' ? fromKey : toKey), fitRect(), pad)
         const FR = fitRect()
         const vpP1 = fitBox(node, full, Math.min(W, H) * 0.03, 12)
         const zi = interpolateZoom(1.0)(toView(vpP0, W, H), toView(vpP1, W, H))
@@ -283,10 +296,16 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
       parentOf,
       chain,
       ready: () => firstReady.current.promise,
+      cropped: () => !!legible && !!(legibleFrame(views.get(currentView()), stageSize(), pad, undefined, layerScale.current.get(st.current.active)?.k) as any).cropped,
+      fitAll: (ms = 450) => {
+        const h = handles.current.get(st.current.active)
+        const v = views.get(currentView())
+        if (h?.xyflow && v) void h.xyflow.setViewport(fitBox(v.bounds, fitRect(), pad), ms ? { duration: ms } : undefined)
+      },
       frame: (ms = 450) => {
         const h = handles.current.get(st.current.active)
         if (!h?.xyflow) return
-        const vp = fitBox(frameOf(currentView()), fitRect(), pad)
+        const vp = fitBox(frameOf(currentView(), st.current.active), fitRect(), pad)
         void h.xyflow.setViewport(vp, ms ? { duration: ms } : undefined)
       },
     }),
@@ -299,7 +318,7 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
   const [vis, setVis] = useState<Record<number, any>>({})
   const visDispatch = (key: number, viewId: string, e: any) => {
     if (!legible) return
-    const ke = keOf(viewId)
+    const ke = scaleOf(key, viewId).ke
     setVis((m) => {
       const cur = m[key] ?? visInit(ke, e.zoom ?? 1)
       const next = visReduce(cur, { ke, ...e })
@@ -332,6 +351,9 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
       `.likec4-element-node-data [data-likec4-node-description]{display:-webkit-box !important;${hide(!!v?.hideDesc)}}`,
       `.likec4-element-node-data [data-likec4-node-technology]{display:block !important;${hide(!!v?.hideDesc)}}`,
       `.likec4-edge-label-container{${hide(!!v?.hideEdgeLabels)}}`,
+      // hidden small text comes back on the node that has keyboard focus or is selected (and the
+      // node's accessible name always carries its description)
+      '.react-flow__node:focus-visible [data-likec4-node-description],.react-flow__node:focus-visible [data-likec4-node-technology],.react-flow__node.selected [data-likec4-node-description],.react-flow__node.selected [data-likec4-node-technology]{opacity:1 !important}',
     ].join('\n')
   }
   const legibleCss = legible
@@ -366,7 +388,7 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
               if (h) h.el = el
               else if (el) handles.current.set(l.key, { el } as any)
             }}
-            style={{ opacity: l.key === active ? 1 : 0, pointerEvents: l.key === active ? 'auto' : 'none', ...(legible ? ({ '--atlas-k': kOf(l.viewId), '--atlas-ke': keOf(l.viewId) } as any) : {}) }}
+            style={{ opacity: l.key === active ? 1 : 0, pointerEvents: l.key === active ? 'auto' : 'none', ...(legible ? ({ '--atlas-k': scaleOf(l.key, l.viewId).k, '--atlas-ke': scaleOf(l.key, l.viewId).ke } as any) : {}) }}
           >
             <ReactLikeC4
               {...layerProps}
@@ -388,7 +410,7 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
                 )
                 if (legible && l.key === 0) {
                   // the first layer: LikeC4 fitted the WHOLE view; frame it legibly instead
-                  const vp = fitBox(frameOf(l.viewId), fitRect(), pad)
+                  const vp = fitBox(frameOf(l.viewId, l.key), fitRect(), pad)
                   void xyflow.setViewport(vp)
                   visRef.current(l.key, l.viewId, { type: 'target', zoom: vp.zoom, until: 0 })
                 }

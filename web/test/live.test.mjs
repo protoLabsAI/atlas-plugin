@@ -24,12 +24,20 @@ test('calloutPlacement: above, clamped, flips below near the top', () => {
   const vp = { x: 0, y: 0, zoom: 1 }
   const canvas = { width: 800, height: 600 }
   const size = { width: 200, height: 60 }
-  assert.deepEqual(calloutPlacement({ x: 300, y: 200, width: 100, height: 50 }, vp, canvas, size), { left: 250, top: 128, side: 'above', arrowX: 100 })
+  assert.deepEqual(calloutPlacement({ x: 300, y: 200, width: 100, height: 50 }, vp, canvas, size), { hidden: false, left: 250, top: 128, side: 'above', arrowX: 100, maxHeight: 584 })
   const top = calloutPlacement({ x: 300, y: 10, width: 100, height: 50 }, vp, canvas, size)
   assert.equal(top.side, 'below')
   assert.equal(top.top, 72)
   const edge = calloutPlacement({ x: 750, y: 200, width: 100, height: 50 }, vp, canvas, size)
   assert.equal(edge.left, 592, 'clamped inside the canvas')
+  // a note taller than the canvas: bounded (it scrolls inside), top stays on the canvas
+  const tall = calloutPlacement({ x: 300, y: 100, width: 100, height: 50 }, vp, canvas, { width: 200, height: 2000 })
+  assert.equal(tall.maxHeight, 584)
+  assert.ok(tall.top >= 8 && tall.top + Math.min(2000, tall.maxHeight) <= 600 - 8 + 1e-6, JSON.stringify(tall))
+  // the anchor left the canvas → hidden (restored when it's back)
+  assert.equal(calloutPlacement({ x: 900, y: 200, width: 100, height: 50 }, vp, canvas, size).hidden, true)
+  assert.equal(calloutPlacement({ x: 300, y: -80, width: 100, height: 50 }, vp, canvas, size).hidden, true)
+  assert.equal(calloutPlacement({ x: 760, y: 200, width: 100, height: 50 }, vp, canvas, size).hidden, false, 'partly visible stays')
   const zoomed = calloutPlacement({ x: 100, y: 100, width: 100, height: 50 }, { x: 10, y: 20, zoom: 2 }, canvas, size)
   assert.deepEqual([zoomed.left, zoomed.top], [210, 148])
 })

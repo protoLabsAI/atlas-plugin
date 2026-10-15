@@ -1,10 +1,14 @@
 // Presenter: tours over the shared Stage (synced-camera zoom between levels). Keyboard:
 // → ← slides (and the steps of a whole-dynamic-view slide) · Enter drill · Esc up/exit ·
-// Tab focus · 1–9 jump · N notes · F fullscreen · [ ] slower/faster.
+// . , focus nodes · 1–9 jump · N notes · F fullscreen · [ ] slower/faster. Keys belong to the
+// diagram surface only: on a button / link / field, Tab + Enter + Space stay native (logic.mjs keyOwner).
 import type { LikeC4Model } from '@likec4/core/model'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { BEAT_MS, CAPTION_FADE_MS, END_HOLD_MS, cycle, dynamicSteps, mdLight, presenterKey, slideDwellMs, stepDwellMs } from './logic.mjs'
+import { BEAT_MS, CAPTION_FADE_MS, END_HOLD_MS, keyOwner, presenterOwns, cycle, dynamicSteps, mdLight, presenterKey, slideDwellMs, stepDwellMs } from './logic.mjs'
 import { applyHighlight, clearHighlight } from './highlight'
+import { Button, Kbd } from '@protolabsai/ui/primitives'
+import { Select } from '@protolabsai/ui/forms'
+import { useToast } from '@protolabsai/ui/overlays'
 import { getSpeed, onSpeed, stepSpeed } from './motion'
 import { Stage, type StageHandle } from './Stage'
 
@@ -59,11 +63,31 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
   const [showNotes, setShowNotes] = useState(true)
   const [focused, setFocused] = useState<string | null>(null)
   const [adhoc, setAdhoc] = useState<Slide | null>(null)
-  const [toast, setToast] = useState<string | null>(null)
+  const toast = useToast()
   const busy = useRef(false)
   const manual = useRef(false)
   const [done, setDone] = useState(false)
   const [captionOut, setCaptionOut] = useState(false)
+  // the notes / caption panel's MEASURED footprint: framing keeps every node above it
+  const notesRef = useRef<HTMLElement | null>(null)
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  const [reserve, setReserve] = useState(record ? 0.24 : 150)
+  useEffect(() => {
+    const el = notesRef.current
+    const root = rootRef.current
+    if (!el || !root) return
+    const ro = new ResizeObserver(() => {
+      const r = root.getBoundingClientRect()
+      const n = el.getBoundingClientRect()
+      if (!n.height) return
+      const px = Math.ceil((r.bottom - n.top + 12) / 8) * 8 // + a gap; 8 px steps so a reflow doesn't re-frame
+      setReserve((p) => (p === px ? p : px))
+    })
+    ro.observe(el)
+    ro.observe(root)
+    return () => ro.disconnect()
+  }, [showNotes])
+  const [cropped, setCropped] = useState(false)
   const [noteSlide, setNoteSlide] = useState(first)
   const st = useRef({ slide, focused, walk })
   st.current = { slide, focused, walk }
@@ -148,6 +172,7 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
     stage.current?.ready().then(async () => {
       await sleep(120)
       if (live && st.current.slide === first) await applySlideDetail(tour[first], true)
+      if (live) setCropped(!!stage.current?.cropped())
     })
     return () => {
       live = false
@@ -248,11 +273,8 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
     stage.current?.diagram()?.focusNode(id)
     setFocused(id)
   }
-  const flash = (t: string) => {
-    setToast(t)
-    window.setTimeout(() => setToast((x) => (x === t ? null : x)), 1600)
-  }
-  useEffect(() => onSpeed((s) => flash(`Transitions: ${s}`)) as any, [])
+  // speed feedback through the DS toast — never in record mode (nothing but the diagram on camera)
+  useEffect(() => onSpeed((s) => !record && void toast({ message: `Transitions: ${s}`, tone: 'info', duration: 1600 })) as any, [record, toast])
 
   const shown = adhoc ?? tour[slide]
   const captioned = adhoc ?? tour[noteSlide] ?? shown // notes follow the camera, not the keypress
@@ -315,8 +337,14 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
   // ------------------------------------------------------------ keyboard
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement | null
-      if (t && (t.tagName === 'SELECT' || t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return
+      const owner = keyOwner(
+        e.composedPath().map((n: any) =>
+          n instanceof Element
+            ? { tag: n.tagName, role: n.getAttribute('role'), editable: (n as HTMLElement).isContentEditable, chrome: n.hasAttribute('data-presenter-chrome') }
+            : null,
+        ),
+      )
+      if (!presenterOwns(e.key, owner)) return
       if (!e.metaKey && !e.ctrlKey && !e.altKey && (e.key === '[' || e.key === ']')) {
         e.preventDefault()
         e.stopImmediatePropagation()
@@ -375,7 +403,7 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
 
   const crumbs = stage.current ? stage.current.chain(view) : [view]
   return (
-    <div className={`presenter${record ? ' presenter--record' : ''}`} data-scheme={scheme} data-atlas-slide={slide + 1} data-atlas-done={done ? '' : undefined}>
+    <div ref={rootRef} className={`presenter${record ? ' presenter--record' : ''}`} data-scheme={scheme} data-atlas-slide={slide + 1} data-atlas-done={done ? '' : undefined}>
       <Stage
         ref={stage}
         model={model}
@@ -387,10 +415,13 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
         pad={PAD}
         layerProps={LAYER_PROPS}
         legible
-        reserveBottom={showNotes ? (record ? 0.24 : 150) : 0}
+        reserveBottom={showNotes ? reserve : 0}
         onNavigateTo={(_to, el) => el && drill(el.id)}
         onNodeClick={(n) => setFocused(n.id)}
-        onSettled={(v) => setView(v)}
+        onSettled={(v) => {
+          setView(v)
+          setCropped(!!stage.current?.cropped())
+        }}
       />
       <nav className="p-crumbs" aria-label="Level">
         {crumbs.map((v, i) => (
@@ -401,26 +432,31 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
         {focused && <em className="focus">· {data?.elements?.[focused]?.title ?? focused}</em>}
       </nav>
       {!record && (
-      <div className="p-top">
+      <div className="p-top" data-presenter-chrome>
         {tours.length > 1 && (
-          <select className="p-tour pl-select" aria-label="Tour" value={tourId} onChange={(e) => onTour(e.target.value)}>
+          <Select className="p-tour" aria-label="Tour" value={tourId} onChange={(e) => onTour(e.target.value)}>
             {tours.map((t) => (
               <option key={t.id} value={t.id}>
                 {t.title}
               </option>
             ))}
-          </select>
+          </Select>
+        )}
+        {cropped && (
+          <Button size="sm" title="This view is framed on its densest part so the text stays readable — show all of it" onClick={() => stage.current?.fitAll(450)}>
+            Fit all
+          </Button>
         )}
         <span className="p-counter" data-testid="counter">
           {slide + 1} / {tour.length}
         </span>
-        <button className="pl-btn pl-btn--sm pl-btn--icon p-exit" title="Exit presenter (Esc at the top level)" aria-label="Exit presenter" onClick={() => onExit(currentView())}>
+        <Button size="sm" icon title="Exit presenter (Esc at the top level)" aria-label="Exit presenter" onClick={() => onExit(currentView())}>
           ×
-        </button>
+        </Button>
       </div>
       )}
       {showNotes && (
-        <aside className={`notes${captionOut ? ' notes--out' : ''}`} aria-live="polite" style={{ ['--caption-fade' as any]: `${CAPTION_FADE_MS}ms` }}>
+        <aside ref={notesRef as any} data-presenter-chrome className={`notes${captionOut ? ' notes--out' : ''}`} aria-live="polite" style={{ ['--caption-fade' as any]: `${CAPTION_FADE_MS}ms` }}>
           {!record && (
           <div className="notes-head">
             {tours.find((t) => t.id === tourId)?.title ?? 'Tour'} · slide {slide + 1}
@@ -432,10 +468,14 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
           ) : (
             <div className="notes-body muted">{data?.views?.[captioned.view]?.title ?? captioned.view}</div>
           )}
-          {!record && <div className="keys">→ ← slides · Enter drill · Esc up · Tab focus · 1–9 jump · N notes · F fullscreen · [ ] speed</div>}
+          {!record && (
+            <div className="keys">
+              <Kbd>→</Kbd> <Kbd>←</Kbd> slides · <Kbd>Enter</Kbd> drill · <Kbd>Esc</Kbd> up · <Kbd>.</Kbd> <Kbd>,</Kbd> focus · <Kbd>1–9</Kbd> jump · <Kbd>N</Kbd> notes · <Kbd>F</Kbd> fullscreen ·{' '}
+              <Kbd>[</Kbd> <Kbd>]</Kbd> speed
+            </div>
+          )}
         </aside>
       )}
-      {toast && !record && <div className="toast p-toast">{toast}</div>}
     </div>
   )
 }

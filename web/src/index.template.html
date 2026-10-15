@@ -2,16 +2,18 @@
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Atlas</title>
-<style>/*__ATLAS_CSS__*/</style>
+<style id="atlas-tokens">/*__ATLAS_TOKENS__*/</style>
+<style id="atlas-css">/*__ATLAS_CSS__*/</style>
 <script>
   // RULE 3 - slug-aware base: "" on the host window, "/agents/<slug>" through the fleet proxy.
   var BASE = location.pathname.split("/plugins/")[0];
   window.ATLAS_BASE = BASE;
   (function () {
-    // RULE 4 - the DS kit stylesheet (before our own styles so they can refine it).
+    // RULE 4 - the DS kit stylesheet: after the bootstrap token snapshot (a host without /_ds
+    // still renders on the DS defaults), before our own styles.
     var l = document.createElement("link");
     l.rel = "stylesheet"; l.href = BASE + "/_ds/plugin-kit.css";
-    document.head.insertBefore(l, document.head.querySelector("style"));
+    document.head.insertBefore(l, document.getElementById("atlas-css"));
     // The viewer bundle, BASE-prefixed (the page URL has no trailing slash, so no relative URLs).
     var s = document.createElement("script");
     s.type = "module"; s.src = BASE + "/plugins/atlas/static/__ATLAS_ENTRY__";

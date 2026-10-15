@@ -6,6 +6,7 @@ import type { LikeC4Model } from '@likec4/core/model'
 import { memo, useEffect, useRef, useState } from 'react'
 import { applyHighlight, clearHighlight, type Highlight } from './highlight'
 import { calloutPlacement, mdLight } from './logic.mjs'
+import { Button } from '@protolabsai/ui/primitives'
 import { Stage, type StageHandle } from './Stage'
 
 export type ExploreCmd = {
@@ -153,29 +154,51 @@ function ExplorerImpl({ model, data, viewId, scheme, themeCss, cmd, onNavigate, 
   )
 }
 
-/** The on-canvas callout: follows its node through pans / zooms / transitions (rAF, only while shown). */
+/** The on-canvas callout. Follows its node through pans / zooms / transitions: a cheap 8 Hz check
+ *  of the camera, and per-frame updates only while the camera is actually moving (no idle rAF).
+ *  Off-canvas anchor → hidden until it's back. Tall notes scroll inside a bounded box.
+ *  TODO(protoContent#602): move to the DS Popover once it takes virtual anchors + an arrow. */
 function Callout({ stage, node, note, onDismiss, onCodeRefClick }: { stage: React.RefObject<StageHandle | null>; node: any; note: string; onDismiss?: () => void; onCodeRefClick?: (e: any) => void }) {
   const ref = useRef<HTMLDivElement>(null)
-  const [pos, setPos] = useState<{ left: number; top: number; side: string; arrowX: number } | null>(null)
+  const [pos, setPos] = useState<any>(null)
   useEffect(() => {
     if (!node) return
     let raf = 0
     let last = ''
-    const tick = () => {
-      raf = requestAnimationFrame(tick)
+    let still = 0
+    const measure = () => {
       const s = stage.current
       const el = ref.current
       const host = el?.parentElement
-      if (!s || !el || !host || s.busy()) return
+      if (!s || !el || !host || s.busy()) return true
       const vp = s.xyflow()?.getViewport?.()
-      if (!vp) return
-      const p = calloutPlacement(node, vp, { width: host.clientWidth, height: host.clientHeight }, { width: el.offsetWidth, height: el.offsetHeight }) as any
-      const key = `${p.left},${p.top},${p.side},${p.arrowX}`
-      if (key !== last) ((last = key), setPos(p))
+      if (!vp) return true
+      const p = calloutPlacement(node, vp, { width: host.clientWidth, height: host.clientHeight }, { width: el.offsetWidth, height: el.scrollHeight }) as any
+      const key = JSON.stringify(p)
+      if (key === last) return false
+      last = key
+      setPos(p)
+      return true
     }
-    raf = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(raf)
-  }, [node, stage])
+    const burst = () => {
+      // follow the camera frame by frame until it has been still for ~10 frames
+      cancelAnimationFrame(raf)
+      const step = () => {
+        still = measure() ? 0 : still + 1
+        if (still < 10) raf = requestAnimationFrame(step)
+      }
+      raf = requestAnimationFrame(step)
+    }
+    burst()
+    const id = window.setInterval(() => measure() && burst(), 125)
+    const ro = new ResizeObserver(() => burst())
+    if (ref.current?.parentElement) ro.observe(ref.current.parentElement)
+    return () => {
+      cancelAnimationFrame(raf)
+      window.clearInterval(id)
+      ro.disconnect()
+    }
+  }, [node, stage, note])
   if (!node) return null
   return (
     <div
@@ -183,12 +206,13 @@ function Callout({ stage, node, note, onDismiss, onCodeRefClick }: { stage: Reac
       className={`callout callout--${pos?.side ?? 'above'}`}
       role="note"
       data-testid="callout"
-      style={{ left: pos?.left ?? -9999, top: pos?.top ?? -9999, ['--arrow-x' as any]: `${pos?.arrowX ?? 20}px` }}
+      hidden={!!pos?.hidden}
+      style={{ left: pos?.left ?? -9999, top: pos?.top ?? -9999, maxHeight: pos?.maxHeight, ['--arrow-x' as any]: `${pos?.arrowX ?? 20}px` }}
     >
       <div className="callout__body" onClick={onCodeRefClick} onKeyDown={onCodeRefClick} dangerouslySetInnerHTML={{ __html: mdLight(note, { codeRefs: true }) }} />
-      <button className="pl-btn pl-btn--ghost pl-btn--xs callout__close" aria-label="Dismiss" onClick={onDismiss}>
+      <Button variant="ghost" size="xs" icon className="callout__close" aria-label="Dismiss" onClick={onDismiss}>
         ×
-      </button>
+      </Button>
     </div>
   )
 }

@@ -35,7 +35,8 @@ for (const v of views) {
     const zoom = vp ? new DOMMatrixReadOnly(getComputedStyle(vp).transform).a : 1
     const size = (sel) => {
       const all = [...root.querySelectorAll(sel)].filter((e) => e.textContent.trim())
-      const shown = all.filter((e) => e.getClientRects().length && getComputedStyle(e).visibility !== 'hidden' && !e.closest('[style*="visibility: hidden"]'))
+      const vis = (e) => { for (let n = e; n && n.nodeType === 1; n = n.parentElement) { const cs = getComputedStyle(n); if (cs.visibility === 'hidden' || +cs.opacity < 0.05) return false } return true }
+      const shown = all.filter((e) => e.getClientRects().length && vis(e))
       if (!all.length) return null
       if (!shown.length) return 'hidden'
       return Math.round(Math.min(...shown.map((e) => parseFloat(getComputedStyle(e).fontSize) * zoom)) * 10) / 10

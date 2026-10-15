@@ -1,5 +1,8 @@
-// Element details side panel: title, kind, technology, description, metadata, tags, links,
-// drill-down + "appears in". Code links ask the console to open its code pane.
+// Element details side panel (the inspector): title, kind, technology, description, metadata,
+// tags, links, drill-down + "appears in". DS components throughout (@protolabsai/ui); code-link
+// ROUTING stays ours (click = code pane, ⌘/Ctrl = editor; pane off → editor + hint).
+import { Badge, Button, Chip, Tag, TextLink } from '@protolabsai/ui/primitives'
+import { PanelHeader } from '@protolabsai/ui/navigation'
 import { descriptionText, mdLight, normaliseLinks, scopedViewOf, viewList } from './logic.mjs'
 
 type Mods = { metaKey?: boolean; ctrlKey?: boolean }
@@ -16,6 +19,8 @@ type Props = {
   onAsk?: () => void
 }
 
+const where = (l: any) => `${l.path}${l.line ? `:${l.line}${l.endLine ? `–${l.endLine}` : ''}` : ''}`
+
 export function Details({ data, fqn, paneOn, onClose, onOpenView, onCode, onCodeRefClick, onAsk }: Props) {
   const el = data?.elements?.[fqn]
   if (!el) return null
@@ -27,141 +32,145 @@ export function Details({ data, fqn, paneOn, onClose, onOpenView, onCode, onCode
   const appears = viewList(data).filter((v: any) => v.id !== drill && v.nodes?.some((n: any) => n.id === fqn))
   const parentFqn = fqn.includes('.') ? fqn.slice(0, fqn.lastIndexOf('.')) : null
   const parent = parentFqn ? data.elements[parentFqn] : null
+  const title = el.title || fqn
   return (
     <aside className="details" aria-label="Element details" data-fqn={fqn}>
-      <header>
-        <div className="d-kind">
-          {el.kind}
-          {parent ? (
-            <>
-              {' '}
-              in{' '}
-              <button className="linkish" onClick={() => onOpenView(scopedViewOf(data, parentFqn) ?? 'index', undefined)} title={parentFqn!}>
-                {parent.title || parentFqn}
-              </button>
-            </>
-          ) : null}
-        </div>
-        <h2>{el.title || fqn}</h2>
-        <button className="pl-btn pl-btn--ghost pl-btn--icon pl-btn--sm d-close" aria-label="Close details" onClick={onClose}>
-          ×
-        </button>
-      </header>
-      {el.technology && <span className="pl-badge d-tech">{el.technology}</span>}
-      {summary && summary !== desc && <div className="d-summary" onClick={onCodeRefClick} onKeyDown={onCodeRefClick} dangerouslySetInnerHTML={{ __html: mdLight(summary, { codeRefs: true }) }} />}
-      {desc && <div className="d-desc" onClick={onCodeRefClick} onKeyDown={onCodeRefClick} dangerouslySetInnerHTML={{ __html: mdLight(desc, { codeRefs: true }) }} />}
-      {(drill || onAsk) && (
-        <div className="d-actions">
-          {drill && (
-            <button className="pl-btn pl-btn--sm d-drill" onClick={() => onOpenView(drill)}>
-              Open drill-down ›
-            </button>
-          )}
-          {onAsk && (
-            <button className="pl-btn pl-btn--sm" data-testid="ask" onClick={onAsk} title="Draft a question about this element in the chat box">
-              Ask about this
-            </button>
-          )}
-        </div>
-      )}
-      {links.length > 0 && (
-        <section>
-          <h3>Links</h3>
-          {paneOn === false && links.some((l: any) => l.kind === 'code') && (
-            <p className="d-hint" data-testid="pane-hint">
-              Turn on the code pane in <strong>Tools ▸ Filesystem</strong> to view code here.
-            </p>
-          )}
-          <ul className="d-links">
-            {links.map((l: any, i: number) => (
-              <li key={i}>
-                {l.kind === 'code' ? (
-                  <div className="d-code-row">
-                    <button
-                      className="d-code"
-                      data-testid="code-link"
-                      onClick={(e) => onCode(l, el.title || fqn, e)}
-                      title={paneOn === false ? `Open ${l.path} in your editor` : `View ${l.path} in the code pane (⌘/Ctrl-click: open in editor)`}
-                    >
-                      <span className="d-ico" aria-hidden>
-                        ⌥
-                      </span>
-                      <span className="d-ltitle">{l.title}</span>
-                      <code>
-                        {l.path}
-                        {l.line ? `:${l.line}${l.endLine ? `–${l.endLine}` : ''}` : ''}
-                      </code>
-                    </button>
-                    <span className="d-code-actions">
-                      {paneOn !== false && (
-                        <button className="pl-btn pl-btn--xs pl-btn--primary" data-testid="code-view" onClick={() => onCode(l, el.title || fqn, 'pane')}>
-                          View
-                        </button>
-                      )}
-                      <button className={`pl-btn pl-btn--xs${paneOn === false ? ' pl-btn--primary' : ''}`} data-testid="code-editor" onClick={() => onCode(l, el.title || fqn, 'editor')}>
-                        Open in editor
-                      </button>
-                    </span>
-                  </div>
-                ) : l.kind === 'web' ? (
-                  <a className="d-web" href={l.url} target="_blank" rel="noopener noreferrer">
-                    <span className="d-ico" aria-hidden>
-                      ↗
-                    </span>
-                    <span className="d-ltitle">{l.title}</span>
-                  </a>
-                ) : (
-                  <span className="d-other" title={l.url}>
-                    {l.title}
-                  </span>
-                )}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-      {meta.length > 0 && (
-        <section>
-          <h3>Metadata</h3>
-          <dl className="d-meta">
-            {meta.map(([k, v]) => (
-              <div key={k}>
-                <dt>{k}</dt>
-                <dd>{Array.isArray(v) ? v.join(', ') : String(v)}</dd>
-              </div>
-            ))}
-          </dl>
-        </section>
-      )}
-      {el.tags?.length > 0 && (
-        <section>
-          <h3>Tags</h3>
-          <div className="d-tags">
-            {el.tags.map((t: string) => (
-              <span key={t} className="pl-tag">
-                #{t}
-              </span>
-            ))}
-          </div>
-        </section>
-      )}
-      {appears.length > 0 && (
-        <section>
-          <h3>Appears in</h3>
-          <ul className="d-views">
-            {appears.map((v: any) => (
-              <li key={v.id}>
-                <button className="linkish" onClick={() => onOpenView(v.id, fqn)}>
-                  {v.title || v.id}
+      <PanelHeader
+        compact
+        kicker={
+          <>
+            {el.kind}
+            {parent ? (
+              <>
+                {' in '}
+                <button type="button" className="linkish" onClick={() => onOpenView(scopedViewOf(data, parentFqn) ?? 'index', undefined)} title={parentFqn!}>
+                  {parent.title || parentFqn}
                 </button>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-      <footer>
-        <code className="d-fqn">{fqn}</code>
-      </footer>
+              </>
+            ) : null}
+          </>
+        }
+        title={title}
+        actions={
+          <Button variant="ghost" size="sm" icon aria-label="Close details" onClick={onClose}>
+            ×
+          </Button>
+        }
+      />
+      <div className="d-body">
+        {el.technology && (
+          <div className="d-tech">
+            <Badge>{el.technology}</Badge>
+          </div>
+        )}
+        {summary && summary !== desc && (
+          <div className="d-summary" onClick={onCodeRefClick} onKeyDown={onCodeRefClick} dangerouslySetInnerHTML={{ __html: mdLight(summary, { codeRefs: true }) }} />
+        )}
+        {desc && <div className="d-desc" onClick={onCodeRefClick} onKeyDown={onCodeRefClick} dangerouslySetInnerHTML={{ __html: mdLight(desc, { codeRefs: true }) }} />}
+        {(drill || onAsk) && (
+          <div className="d-actions">
+            {drill && (
+              <Button size="sm" onClick={() => onOpenView(drill)}>
+                Open drill-down ›
+              </Button>
+            )}
+            {onAsk && (
+              <Button size="sm" data-testid="ask" onClick={onAsk} title="Draft a question about this element in the chat box">
+                Ask about this
+              </Button>
+            )}
+          </div>
+        )}
+        {links.length > 0 && (
+          <section>
+            <h3>Links</h3>
+            {paneOn === false && links.some((l: any) => l.kind === 'code') && (
+              <p className="d-hint" data-testid="pane-hint">
+                Turn on the code pane in <strong>Tools ▸ Filesystem</strong> to view code here.
+              </p>
+            )}
+            <ul className="d-links">
+              {links.map((l: any, i: number) => (
+                <li key={i}>
+                  {l.kind === 'code' ? (
+                    <div className="d-code-row" data-testid="code-link-row">
+                      {/* the DS Chip points at the code location; the sibling Buttons are the explicit actions */}
+                      <span data-testid="code-link" className="d-chip">
+                        <Chip
+                          label={l.title}
+                          meta={where(l)}
+                          mono
+                          icon="⌥"
+                          title={paneOn === false ? `Open ${where(l)} in your editor` : `View ${where(l)} in the code pane (⌘/Ctrl-click: open in editor)`}
+                          onClick={(e) => onCode(l, title, e)}
+                        />
+                      </span>
+                      <span className="d-code-actions">
+                        {paneOn !== false && (
+                          <Button size="xs" variant="primary" data-testid="code-view" onClick={() => onCode(l, title, 'pane')}>
+                            View
+                          </Button>
+                        )}
+                        <Button size="xs" variant={paneOn === false ? 'primary' : 'default'} data-testid="code-editor" onClick={() => onCode(l, title, 'editor')}>
+                          Open in editor
+                        </Button>
+                      </span>
+                    </div>
+                  ) : l.kind === 'web' ? (
+                    <TextLink href={l.url} external>
+                      {l.title} ↗
+                    </TextLink>
+                  ) : (
+                    <span className="d-other" title={l.url}>
+                      {l.title}
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+        {meta.length > 0 && (
+          <section>
+            <h3>Metadata</h3>
+            <dl className="d-meta">
+              {meta.map(([k, v]) => (
+                <div key={k}>
+                  <dt>{k}</dt>
+                  <dd>{Array.isArray(v) ? v.join(', ') : String(v)}</dd>
+                </div>
+              ))}
+            </dl>
+          </section>
+        )}
+        {el.tags?.length > 0 && (
+          <section>
+            <h3>Tags</h3>
+            <div className="d-tags">
+              {el.tags.map((t: string) => (
+                <Tag key={t}>#{t}</Tag>
+              ))}
+            </div>
+          </section>
+        )}
+        {appears.length > 0 && (
+          <section>
+            <h3>Appears in</h3>
+            <ul className="d-views">
+              {appears.map((v: any) => (
+                <li key={v.id}>
+                  <button type="button" className="linkish" onClick={() => onOpenView(v.id, fqn)}>
+                    {v.title || v.id}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+        <footer>
+          <code className="d-fqn">{fqn}</code>
+        </footer>
+      </div>
     </aside>
   )
 }

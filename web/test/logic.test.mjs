@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  keyOwner, presenterOwns,
   autoTour, toursFor, cleanTours, tourArray, normaliseLink, normaliseLinks, resolveProject, codeOpenMessage,
   presenterKey, cycle, slideForView, parseShow, parentView, viewChain, searchModel, viewForElement,
   keepView, viewOptions, mdLight, schemeForRgb, interpolateZoom, fitBox, errorFileRel, elementOrder, safeRelPath,
@@ -125,8 +126,9 @@ test('presenterKey: the keyboard state machine', () => {
   assert.deepEqual(presenterKey('ArrowLeft', {}, { slide: 0, count: 5 }), { type: 'noop' })
   assert.deepEqual(presenterKey('Enter', {}, ctx), { type: 'drill' })
   assert.deepEqual(presenterKey('Escape', {}, ctx), { type: 'up' })
-  assert.deepEqual(presenterKey('Tab', {}, ctx), { type: 'focus', dir: 1 })
-  assert.deepEqual(presenterKey('Tab', { shiftKey: true }, ctx), { type: 'focus', dir: -1 })
+  assert.deepEqual(presenterKey('.', {}, ctx), { type: 'focus', dir: 1 })
+  assert.deepEqual(presenterKey(',', {}, ctx), { type: 'focus', dir: -1 })
+  assert.equal(presenterKey('Tab', {}, ctx), null, 'Tab is the browser\'s')
   assert.deepEqual(presenterKey('n', {}, ctx), { type: 'notes' })
   assert.deepEqual(presenterKey('F', {}, ctx), { type: 'fullscreen' })
   assert.deepEqual(presenterKey('1', {}, ctx), { type: 'goto', index: 0 })
@@ -223,4 +225,28 @@ test('interpolateZoom endpoints + fitBox', () => {
   const vp = fitBox({ x: 0, y: 0, width: 100, height: 50 }, { x: 0, y: 0, width: 300, height: 300 }, 50)
   assert.equal(vp.zoom, 2)
   assert.deepEqual([vp.x, vp.y], [50, 100])
+})
+
+test('keyboard ownership: graph shortcuts never steal Tab / Enter / Space from controls', () => {
+  const el = (tag, extra = {}) => ({ tag, role: null, editable: false, chrome: false, ...extra })
+  // a button in the presenter chrome (Exit): native activation + Tab order
+  const onButton = keyOwner([el('BUTTON'), el('DIV', { chrome: true }), el('BODY')])
+  assert.equal(onButton, 'control')
+  for (const k of ['Enter', ' ', 'Tab', 'ArrowRight', '1', 'n']) assert.equal(presenterOwns(k, onButton), false, k)
+  assert.equal(presenterOwns('Escape', onButton), true, 'Escape still leaves (WCAG 2.1.2)')
+  // a link / code ref (role=button) inside the notes
+  assert.equal(keyOwner([el('CODE', { role: 'button' }), el('DIV'), el('ASIDE', { chrome: true })]), 'control')
+  assert.equal(keyOwner([el('A'), el('P')]), 'control')
+  // the tour <select>, an input, contenteditable: hands off entirely
+  for (const p of [[el('SELECT')], [el('INPUT')], [el('DIV', { editable: true })]]) {
+    assert.equal(keyOwner(p), 'editable')
+    assert.equal(presenterOwns('Escape', 'editable'), false)
+  }
+  // anywhere in the chrome, even a plain div
+  assert.equal(keyOwner([el('SPAN'), el('DIV', { chrome: true })]), 'control')
+  // the diagram (an xyflow node is role=group inside the shadow root) / the page body: ours
+  const onGraph = keyOwner([el('DIV', { role: 'group' }), el('DIV'), null, el('DIV'), el('BODY'), el('HTML')])
+  assert.equal(onGraph, 'surface')
+  for (const k of ['Enter', 'ArrowRight', '.', 'Escape']) assert.equal(presenterOwns(k, onGraph), true, k)
+  assert.equal(presenterOwns('Tab', onGraph), false)
 })

@@ -385,8 +385,13 @@ export function presenterKey(key, mods = {}, ctx = { slide: 0, count: 0 }) {
     case 'Escape':
     case 'Backspace':
       return { type: 'up' }
-    case 'Tab':
-      return { type: 'focus', dir: mods.shiftKey ? -1 : 1 }
+    // node focus: `.` next / `,` previous — Tab stays the browser's (WCAG 2.1.1 / 2.4.3)
+    case '.':
+    case '>':
+      return { type: 'focus', dir: 1 }
+    case ',':
+    case '<':
+      return { type: 'focus', dir: -1 }
     case 'n':
     case 'N':
       return { type: 'notes' }
@@ -483,24 +488,31 @@ export function highlightPlan(view, focus = [], edges = []) {
 /**
  * Where an on-canvas callout goes: above the node's on-screen box, centred and clamped to the
  * canvas; below when there's no room above. `node` in flow coords, `vp` = {x, y, zoom},
- * `canvas`/`size` = {width, height}. → {left, top, side: 'above'|'below', arrowX}
+ * `canvas`/`size` = {width, height}. Policy when the anchor leaves the canvas: HIDE (and come
+ * back when it returns) — never pinned to an edge pointing at nothing. `maxHeight` bounds a tall
+ * note (it scrolls inside); `top` is always within the canvas.
+ * → {hidden, left, top, side: 'above'|'below', arrowX, maxHeight}
  */
 export function calloutPlacement(node, vp, canvas, size, gap = 12, margin = 8) {
   const sx = node.x * vp.zoom + vp.x
   const sy = node.y * vp.zoom + vp.y
   const sw = node.width * vp.zoom
   const sh = node.height * vp.zoom
-  const cx = sx + sw / 2
+  const maxHeight = Math.max(48, Math.round(canvas.height - 2 * margin))
+  const h = Math.min(size.height, maxHeight)
+  const offCanvas = sx + sw < 0 || sy + sh < 0 || sx > canvas.width || sy > canvas.height
+  const cx = Math.min(Math.max(sx + sw / 2, 0), canvas.width)
   let left = Math.round(cx - size.width / 2)
   left = Math.max(margin, Math.min(left, canvas.width - size.width - margin))
   let side = 'above'
-  let top = Math.round(sy - gap - size.height)
+  let top = Math.round(sy - gap - h)
   if (top < margin) {
     side = 'below'
-    top = Math.round(Math.min(sy + sh + gap, canvas.height - size.height - margin))
+    top = Math.round(sy + sh + gap)
   }
+  top = Math.max(margin, Math.min(top, canvas.height - h - margin))
   const arrowX = Math.round(Math.max(12, Math.min(cx - left, size.width - 12)))
-  return { left, top, side, arrowX }
+  return { hidden: offCanvas, left, top, side, arrowX, maxHeight }
 }
 
 /** The `atlas.viewing` payload — what the operator sees right now. */
@@ -760,12 +772,13 @@ export const LEGIBLE = { title: 12, desc: 9, edge: 9, kMax: 1.6, keMax: 2 }
  * densest window at the minimum legible zoom instead of the whole view (present/record only).
  * → {k, zoom, box (flow coords to fit), cropped}
  */
-export function legibleFrame(view, stage, pad = 56, t = LEGIBLE) {
+export function legibleFrame(view, stage, pad = 56, t = LEGIBLE, kFixed) {
   const b = view?.bounds
   if (!b || !(b.width > 0) || !(stage.width > 0)) return { k: 1, ke: 1, zoom: 1, box: b, cropped: false }
   const avail = { w: Math.max(1, stage.width - 2 * pad), h: Math.max(1, stage.height - 2 * pad) }
   const zFit = Math.min(avail.w / b.width, avail.h / b.height)
-  const k = Math.min(t.kMax, Math.max(1, t.title / (LIKEC4_TITLE_PX * zFit)))
+  // `kFixed`: a layer whose text scale is already set (it never changes under the viewer)
+  const k = kFixed ?? Math.min(t.kMax, Math.max(1, t.title / (LIKEC4_TITLE_PX * zFit)))
   const zMin = t.title / (LIKEC4_TITLE_PX * k)
   // edge labels get their own scale (they sit on the lines, not in fixed boxes)
   const keFor = (z) => Math.min(t.keMax, Math.max(1, t.edge / (LIKEC4_EDGE_PX * z)))
@@ -840,4 +853,32 @@ export function visReduce(s, e) {
     }
   }
   return s
+}
+
+// ---------------------------------------------------------------- keyboard ownership
+const CONTROL_TAGS = new Set(['BUTTON', 'A', 'SUMMARY', 'OPTION'])
+const EDIT_TAGS = new Set(['INPUT', 'TEXTAREA', 'SELECT'])
+const CONTROL_ROLES = new Set(['button', 'link', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'option', 'tab', 'switch', 'checkbox', 'radio', 'combobox', 'slider', 'spinbutton', 'menu', 'listbox', 'textbox', 'searchbox'])
+
+/**
+ * Who owns a keydown, from its composed path (innermost first; shadow DOM included) — entries
+ * `{tag, role, editable, chrome}`. 'editable' (a field: the presenter keeps out entirely),
+ * 'control' (a button / link / menu item… or anything in the presenter's chrome: native
+ * activation + Tab order win, only Escape is ours), else 'surface' (the diagram / page: ours).
+ */
+export function keyOwner(path) {
+  for (const n of path ?? []) {
+    if (!n) continue
+    if (n.editable || EDIT_TAGS.has(n.tag)) return 'editable'
+    if (CONTROL_TAGS.has(n.tag) || CONTROL_ROLES.has(n.role) || n.chrome) return 'control'
+  }
+  return 'surface'
+}
+
+/** Should the presenter act on this key, given who owns it? (Tab is never ours.) */
+export function presenterOwns(key, owner) {
+  if (key === 'Tab') return false
+  if (owner === 'editable') return false
+  if (owner === 'control') return key === 'Escape'
+  return true
 }
