@@ -97,7 +97,9 @@ def test_best_view_smallest_containing_and_ties_prefer_current():
     assert N.best_view(MODEL, ["app.api", "app.store"]) == ("app_detail", "")
     assert N.best_view(MODEL, ["app.graph"], drill=True) == ("graph_detail", "")
     assert N.best_view(MODEL, ["app.api"]) == ("app_detail", "")  # element views before dynamic
-    assert N.best_view(MODEL, ["app.graph.loop", "user"])[0] is None
+    # no view shows both as themselves → the closest view showing each via an ancestor
+    assert N.best_view(MODEL, ["app.graph.loop", "user"]) == ("app_detail", "")
+    assert N.best_view(MODEL, ["app.graph.loop", "app.graph.llm", "user"])[0] is None  # would collapse onto one node
 
 
 def test_best_view_tie_prefers_the_operators_view():
@@ -129,6 +131,9 @@ def test_relations_direct_and_path(stub):
     assert ev["edges"] == ["e2", "e1"]  # undirected fallback
     _, why = show_target(stub, view="graph_detail", relations=[["app.graph.loop", "user"]])
     assert "user isn't in view graph_detail" in why
+    # nested ends with no explicit view → their ancestors' edge in the parent view
+    ev, _ = show_target(stub, relations=[["app.graph.loop", "user"]])
+    assert ev["view"] == "app_detail" and ev["edges"] == ["c2", "c1"]
 
 
 def test_path_edges_unit():

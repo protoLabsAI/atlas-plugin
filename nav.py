@@ -96,14 +96,19 @@ def node_for(view: dict, fqn: str) -> str | None:
     return None
 
 
-def views_containing(model: dict, fqns: list[str], *, dynamic: bool = False) -> list[str]:
+def views_containing(model: dict, fqns: list[str], *, dynamic: bool = False, via_ancestors: bool = False) -> list[str]:
+    """Views showing every element as a node — or, ``via_ancestors``, as itself or its nearest
+    ancestor, with all of them landing on DIFFERENT nodes (so they can still be told apart)."""
     out = []
     for vid, v in L.views(model).items():
         kind = L.view_kind(v)
         if kind == "deployment" or (kind == "dynamic") != dynamic:
             continue
-        ids = node_ids(v)
-        if all(f in ids for f in fqns):
+        if via_ancestors:
+            mapped = [node_for(v, f) for f in fqns]
+            if all(mapped) and len(set(mapped)) == len(mapped):
+                out.append(vid)
+        elif all(f in node_ids(v) for f in fqns):
             out.append(vid)
     return out
 
@@ -112,23 +117,35 @@ def best_view(
     model: dict, fqns: list[str], *, current: str | None = None, drill: bool = False
 ) -> tuple[str | None, str]:
     """The view to show ``fqns`` in → ``(view_id, "")`` or ``(None, why)``."""
-    vs = L.views(model)
     if drill and len(fqns) == 1:
         dd = L.drilldowns(model).get(fqns[0])
         if dd:
             return dd, ""
-    cands = views_containing(model, fqns) or views_containing(model, fqns, dynamic=True)
+    cands = (
+        views_containing(model, fqns)
+        or views_containing(model, fqns, dynamic=True)
+        # none shows them all as themselves → the closest view showing each through an ancestor
+        or views_containing(model, fqns, via_ancestors=True)
+    )
     if not cands:
         per = []
         for f in fqns:
             where = views_containing(model, [f]) + views_containing(model, [f], dynamic=True)
             per.append(f"{f}: {', '.join(where) if where else 'no view'}")
         return None, "no single view shows " + " + ".join(fqns) + " (" + "; ".join(per) + ")"
-    cands.sort(key=lambda vid: (len(vs[vid].get("nodes") or []), 0 if vid == current else 1, vid))
-    best = len(vs[cands[0]].get("nodes") or [])
-    if current in cands and len(vs[current].get("nodes") or []) == best:
-        return current, ""
-    return cands[0], ""
+    ranked = rank_views(model, fqns, cands, current)
+    return ranked[0], ""
+
+
+def rank_views(model: dict, fqns: list[str], cands: list[str], current: str | None = None) -> list[str]:
+    """Best first: elements shown as themselves (else by the closest ancestors), then the fewest
+    nodes, then the operator's current view."""
+    vs = L.views(model)
+
+    def distance(vid: str) -> int:  # how far each element sits below the node that shows it
+        return sum(f.count(".") - (node_for(vs[vid], f) or "").count(".") for f in fqns)
+
+    return sorted(cands, key=lambda vid: (distance(vid), len(vs[vid].get("nodes") or []), vid != current, vid))
 
 
 def path_edges(view: dict, a: str, b: str) -> list[str]:
@@ -339,12 +356,11 @@ def plan_view_show(
         view, why = best_view(model, wanted, current=current, drill=drill)
         if not view:
             return None, why
-        if pairs:  # prefer the smallest view where every relation actually has a path
+        if pairs:  # prefer the best-ranked view where every relation actually has a path
+            pool = views_containing(model, wanted) or views_containing(model, wanted, via_ancestors=True)
             ok = [
                 vid
-                for vid in sorted(
-                    views_containing(model, wanted), key=lambda x: (len(vs[x].get("nodes") or []), x != current, x)
-                )
+                for vid in rank_views(model, wanted, pool, current)
                 if all(path_edges(vs[vid], node_for(vs[vid], a) or "", node_for(vs[vid], b) or "") for a, b in pairs)
             ]
             view = ok[0] if ok else view
