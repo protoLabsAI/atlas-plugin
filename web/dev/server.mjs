@@ -33,7 +33,21 @@ const state = { scenario: 'normal', token: '', tours: true, pane: true }
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml' }
 
 // Fallback tours for a model without its own atlas.tours.json: the bundled example's.
-const SAMPLE_TOURS = JSON.parse(readFileSync(resolve(here, '../../examples/protoagent/atlas.tours.json'), 'utf8'))
+// the example's tours when serving the example model; else a sample for the atlas-spike skill-2 model
+const EXAMPLE_DIR = resolve(here, '../../examples/protoagent')
+const SAMPLE_TOURS = MODEL_DIR === EXAMPLE_DIR ? JSON.parse(readFileSync(join(EXAMPLE_DIR, 'atlas.tours.json'), 'utf8')) : { tours: [
+  { id: 'overview', title: 'protoAgent in 5 minutes', slides: [
+    { view: 'index', note: 'The landscape: an **operator**, the protoAgent runtime, and the systems it talks to.' },
+    { view: 'index', focus: 'proto_agent', note: 'protoAgent is the system we own. Press *Enter* to open it.' },
+    { view: 'proto_agent_detail', note: 'Inside: console, API server, agent graph, tools, knowledge.' },
+    { view: 'proto_agent_detail', focus: 'proto_agent.graph', note: 'The agent graph owns the tool loop — `graph/agent.py`.' },
+    { view: 'proto_agent_graph_detail', note: 'The graph: core loop, LLM client, middleware, subagents.' },
+    { view: 'chat_turn_flow', step: 1, note: 'One chat turn: the operator sends a message.' },
+    { view: 'chat_turn_flow', step: 3, note: 'The server hands the turn to the graph — it never calls the model directly.' },
+    { view: 'chat_turn_flow', step: 5, note: 'The LLM client asks the gateway for a completion.' },
+    { view: 'index', note: 'Back out to the landscape.' },
+  ] },
+] }
 
 async function dirHash(dir) {
   const h = createHash('sha256')

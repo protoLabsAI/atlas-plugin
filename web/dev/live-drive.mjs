@@ -49,5 +49,15 @@ await frame.locator('.react-flow__node', { hasText: /^Agent graph/ }).first().cl
 await wait(900)
 const st = await frame.evaluate(() => window.__atlas)
 check('a click hands control back (highlight cleared, selection published)', !st.highlight && st.selected === 'proto_agent.graph', JSON.stringify(st.viewing))
+// a flow step AND a callout: the step is walked, then the highlight + callout land over it
+await page.evaluate(() => window.emit('atlas.show', { view: 'chat_turn_flow', step: 2, focus: ['proto_agent.console'], note: 'The console posts the turn.' }))
+await wait(4000)
+const st2 = await frame.evaluate(() => ({ walk: window.__atlas.walk, hl: window.__atlas.highlight, callouts: document.querySelectorAll('[data-testid=callout]').length, wt: !!window.__atlasStage?.diagram()?.getContext().activeWalkthrough }))
+check('step + focus + note: walkthrough kept, callout shown', st2.walk === 2 && st2.wt && st2.callouts === 1 && st2.hl?.note, JSON.stringify(st2))
+await page.screenshot({ path: join(OUT, 'mock-live-step-callout.png') })
+// only the exact topic is honoured
+await page.evaluate(() => window.emit('other.atlas.show', { view: 'index' }))
+await wait(800)
+check('foreign x.atlas.show ignored', (await frame.evaluate(() => window.__atlas.view)) === 'chat_turn_flow')
 console.log(errs.join('\n'))
 await browser.close()

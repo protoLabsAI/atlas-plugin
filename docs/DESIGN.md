@@ -66,8 +66,13 @@ everything but the highlighted set, fits the camera to it and pins `note` as a c
 presenter mode when `present`). `atlas.clear` `{}` drops highlights + callouts.
 
 `atlas.viewing` `{view, step, selected, focus, edges, note, mode, tour, slide}` — published by the
-viewer (debounced) whenever what the operator sees changes; the backend keeps the latest in
-memory (`registry.on`) for `atlas_describe(current=True)` and relative steps.
+viewer (debounced) whenever what the operator sees changes, every 30 s while visible (heartbeat),
+with `hidden: true` when the tab is hidden and `closed: true` on pagehide; each carries the viewer's
+random `instance` id. It is UNTRUSTED (any bearer holder can publish any topic): the backend keeps a
+sanitized copy per instance (known keys, typed, bounded; ids checked against the model when read),
+treats a view silent for 90 s as gone, and `atlas_describe(current=True)` reports the most recent
+open one — labelled as untrusted viewer data — and how many others are open. The viewer acts only
+on the exact topics `atlas.show` / `atlas.clear`.
 
 ## Agent tools
 
