@@ -23,12 +23,14 @@ config:
   model_dir: architecture   # the model's directory — relative to the project root, or absolute
   project: ""               # which filesystem project the model belongs to; blank = auto
   node_path: ""             # a Node.js >= 20 executable; blank = node on PATH, then the managed runtime
+  transition_speed: normal  # viewer zoom/fade speed: slow | normal | fast
 
 # Settings ▸ Plugins ▸ Atlas. Read live — a change applies on the next request.
 settings:
   - { key: model_dir, label: "Model directory", type: string, description: "Where the LikeC4 model (.c4 files + likec4.config.json) lives. Relative to the project root, or an absolute path." }
   - { key: project, label: "Project", type: string, description: "The filesystem project the model describes (a name from Settings ▸ Filesystem). Code links in the model open files in it. Blank picks the console's project, else the first one." }
   - { key: node_path, label: "Node.js path", type: string, spawns: true, description: "A Node.js 20+ executable to run the layout engine with. Blank uses node on PATH, then protoAgent's managed Node runtime." }
+  - { key: transition_speed, label: "Transition speed", type: select, options: [slow, normal, fast], description: "How fast the viewer zooms into a drill-down and crossfades between views (explore and presenter). Reduced-motion still wins. Presenter: [ and ] adjust it for the session. Applies on the next view load." }
 
 # Console view (ADR 0026). The page is PUBLIC (an iframe navigation carries no bearer);
 # the model and status are GATED under /api/plugins/atlas.

@@ -146,15 +146,15 @@ async def test_tools_against_the_real_example(project, registry):
     svc = AtlasService(lambda: {"model_dir": "architecture"})
     tools = {t.name: t for t in build_tools(svc, registry)}
     report = await tools["atlas_validate"].ainvoke({})
-    assert "Engine: OK" in report and "5 views" in report
+    assert "Engine: OK" in report and "8 views" in report
     # the example links into files the tmp project doesn't have → lint says so
     assert "[code-link-missing]" in report
     tree = await tools["atlas_describe"].ainvoke({})
-    assert "proto_agent_detail" in tree and "overview — protoAgent in 5 minutes (7 slides)" in tree
+    assert "proto_agent_detail" in tree and "overview — protoAgent in 5 minutes (8 slides)" in tree
     flow = await tools["atlas_describe"].ainvoke({"view": "chat_turn_flow"})
-    assert "9. proto_agent.server.chat → proto_agent.console: SSE stream" in flow or "SSE stream" in flow
-    shown = await tools["atlas_show"].ainvoke({"tour": "overview", "slide": 7, "present": True})
-    assert shown.startswith("Showing tour overview slide 7")
+    assert "9. proto_agent.interfaces.server.chat → proto_agent.interfaces.console: SSE stream" in flow
+    shown = await tools["atlas_show"].ainvoke({"tour": "overview", "slide": 8, "present": True})
+    assert shown.startswith("Showing tour overview slide 8")
 
 
 @needs_node
@@ -166,8 +166,18 @@ async def test_validate_reports_engine_errors_with_file_line(project, registry):
 
 
 @needs_node
-def test_example_tours_are_lint_clean(project):
+def test_example_is_lint_clean(project):
+    """The shipped example passes every Atlas rule — drill-downs, tours, no view over the node cap
+    — and, with the files its code links name present, has no dangling links either."""
+    import re
+
+    for c4 in (project / "architecture").glob("*.c4"):
+        for rel in re.findall(r"link /(\S+?)(?:#\S*)? ", c4.read_text()):
+            p = project / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.touch()
     svc = AtlasService(lambda: {"model_dir": "architecture"})
-    _payload, model = svc.current()
-    findings = L.lint(model, svc.current_tours(), project)
-    assert not [f for f in findings if f["rule"].startswith("tour")], findings
+    payload, model = svc.current()
+    assert payload["ok"] is True
+    assert L.lint(model, svc.current_tours(), project) == []
+    assert max(len(v["nodes"]) for v in model["views"].values()) <= L.MAX_VIEW_NODES

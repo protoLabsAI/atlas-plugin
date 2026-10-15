@@ -6,7 +6,7 @@ description: Author LikeC4 architecture models (.c4 files) for the Atlas plugin 
 # Writing LikeC4 for Atlas
 
 Verified against **likec4 1.60.0**. Every snippet here is an excerpt of a project under
-`examples/` that passes `likec4 validate` (`bash examples/check.sh` re-proves it).
+a project that passed `likec4 validate` when this skill was written.
 LikeC4 is **not** Mermaid and **not** Structurizr. Don't carry those habits over (see *Common mistakes*).
 
 ## 1. Project layout
@@ -146,7 +146,7 @@ views {
 - View properties (`title`, `description`, `#tag`, `link`) must come **before** any predicate.
 - Predicates run in order. `exclude` only removes what was already included.
 
-Predicate cheat-sheet (from `examples/predicates`):
+Predicate cheat-sheet (verified):
 ```likec4
   view graph_neighbours {
     title 'Who talks to the graph'
@@ -231,7 +231,7 @@ Steps are written in the view itself, not in the model, and don't need a matchin
 ```
 - `<-` is a response step. `notes` accepts Markdown (`'''…'''`). A step's `navigateTo` must name a **dynamic** view.
 - Blocks: `parallel`/`par`, `opt`, `loop`, `break`, `alt { when 'x' {…} else {…} }`, `try {…} catch {…} finally {…}`.
-  These are marked experimental upstream. **`parallel` inside `parallel` is rejected.** From `examples/flow_control`:
+  These are marked experimental upstream. **`parallel` inside `parallel` is rejected.** Verified example:
   ```likec4
     alt {
       when 'in stock' { shop.api -> shop.db 'reserve' }
@@ -246,7 +246,7 @@ Steps are written in the view itself, not in the model, and don't need a matchin
 - `variant sequence` (or `diagram`, the default) is only valid in `dynamic view`.
 - **Sequence leaf rule, which the validator does NOT enforce:** if a step uses an element *and* another step uses one of
   its descendants, the ancestor turns into a frame and **its steps are silently dropped**
-  (`examples/silent_sequence_ancestor`: 3 steps declared, 2 rendered). In sequence views use only leaf elements, or
+  (a verified case: 3 steps declared, 2 rendered; `atlas_validate` flags it as `sequence-nesting`). In sequence views use only leaf elements, or
   only one level of a branch.
 - Model relationships can zoom into a flow: `a -> b { navigateTo chat_turn_flow }`. That target **must be a dynamic view**.
 
@@ -271,17 +271,23 @@ Inside `extend X { }` you get X's scope, so siblings resolve by short name. `ext
 ## 8. Conventions for Atlas
 
 1. **One model, many views.** Each element is declared once. Views select from the model and never redeclare elements.
-   Suggested files: `atlas/spec.c4`, `atlas/model.c4` (plus `atlas/<area>.c4` using `extend`), `atlas/views.c4`.
+   The model lives in the project's **`architecture/`** folder (Atlas's `model_dir` setting), with `likec4.config.json`
+   in that folder: `architecture/spec.c4`, `architecture/model.c4` (plus `architecture/<area>.c4` using `extend`),
+   `architecture/views.c4`, and optionally `architecture/atlas.tours.json`.
 2. **Levels:** `system` (context) → `container` → `component`. Actors and external systems are top-level.
 3. **Every element that has children gets `view <fqn_with_underscores>_detail of <fqn>`**, so drill-down always works.
    Declare it before any other scoped view of that element, because the first one is the default.
 4. **Ids are stable snake_case** (`proto_agent`, `tool_loop`), never renamed casually: view names, FQNs and URLs derive from them.
    Titles carry the display text.
-5. **Code links use root-relative paths:** put `likec4.config.json` at the **repo root** and write
-   `link /graph/agent.py#L10-L40 'Source'`. LikeC4 resolves the leading `/` against the project root, so it stays correct
-   wherever the `.c4` file lives.
+5. **Code links use project-root paths:** write `link /src/graph/agent.py#L10-L40 'Source'`. Atlas reads a leading `/`
+   as the **project root** (not the model folder), so the link stays correct wherever the `.c4` file lives, and the
+   viewer opens it in the console's code pane. Never link outside the project; Atlas drops those links.
 6. **Metadata keys:** `adr` (string or array of ADR numbers as strings), `owner`. Use quoted strings only.
 7. **Flows** are `dynamic view <name>_flow` over leaf components. Link them from the model relationship with `navigateTo`.
+8. **At most ~12 nodes per view** (`atlas_validate` flags `busy-view` past 12). A view any busier is unreadable in the
+   console panel. When an element has more children than that, group them into sub-systems (a `subsystem` kind in
+   the spec) and give each sub-system its own scoped view. The parent's view then shows the few groups, and each group
+   drills into its members. `include *` in a scoped view also pulls in the neighbours its children talk to, so count those too.
 
 ```likec4
     graph = container 'Agent graph' {
@@ -301,25 +307,38 @@ Inside `extend X { }` you get X's scope, so siblings resolve by short name. `ext
       navigateTo chat_turn_flow
     }
 ```
-(Full project, including `proto_agent_detail` / `proto_agent_server_detail` / `proto_agent_graph_detail` views: `examples/atlas`.)
+(The plugin's `examples/protoagent` model follows all of these: three sub-systems under `proto_agent`, and no view over 10 nodes.)
 
 ## 9. Validation loop
 
-```bash
-npx likec4 validate --json --no-layout <project-dir> 2>/dev/null > /tmp/v.json; echo "exit=$?"
-```
-1. Write or edit the `.c4` files.
-2. Run the command. JSON goes to stdout and logs go to stderr. Exit code is `0` when valid and `1` when not.
-3. For each `errors[]` entry, open `file` at **`line + 1`** (lines and columns are 0-based) and fix the **first** error in
-   each file first. Parse errors cascade into long `Expecting: one of these possible Token sequences…` lists.
-4. Repeat until `valid` is true **and** `stats.totalErrors == 0`. With `-f/--file`, `valid` covers only the filtered
-   files, so it can be `true` while other files are broken. See `VALIDATE_OUTPUT.md`.
-5. To check rendering (drill-down, sequence steps): `npx likec4 export json --skip-layout -o out.json <dir>`, then read
-   `views.<id>.nodes[].navigateTo` and `edges`. The output is an **array** with one entry per project.
+1. Write or edit the `.c4` files (and `atlas.tours.json`) with the normal file tools.
+2. Call **`atlas_validate`**. It runs the same engine the viewer uses, then Atlas's lint. Engine errors come back as
+   `file:line message` (lines are 1-based).
+3. Fix the **first** error in each file first. Parse errors cascade into long `Expecting: one of these possible Token
+   sequences…` lists, which Atlas truncates.
+4. Repeat until it says `Engine: OK` and `Lint: clean`. The lint findings matter too: `no-drilldown`, `code-link-missing`,
+   `sequence-nesting`, `busy-view`, `empty-view` and broken tour slides.
+5. While the model has errors, the open viewer keeps showing the last good version with an error banner, so the operator
+   never sees a blank diagram mid-edit.
+
+## 9b. Explaining and presenting the diagram
+
+Use protoAgent's own surfaces. Don't paste diagrams or code into the chat.
+
+- **Drive the view with `atlas_show`.** `atlas_show(view="proto_agent_core_detail", focus="proto_agent.core.graph")`
+  brings that view up in the console with the element highlighted. `step=` walks a dynamic view, and
+  `tour=` / `slide=` / `present=true` runs a presentation. Call `atlas_describe` first to get the view ids, element
+  ids and step numbers.
+- **Point at the code with `show_code`.** When you explain an element, take its code link from `atlas_describe` or the
+  `.c4` source. Get exact lines with `search_files` / `read_file`, then call core's
+  `show_code(project, path, line, end_line, note)`. The code opens in the console's code pane beside the diagram, with a
+  one-sentence note on why it matters. `path` is the link's path without the leading `/`.
+- A good explanation is: `atlas_show` the view, one or two sentences on the element's role, `show_code` its key lines,
+  then the next element or step. Keep each turn to one element or one step.
 
 ## 10. Common mistakes (real 1.60.0 errors)
 
-Each one is reproduced under `examples/_mistakes/<name>/` and asserted by `check.sh`.
+Each one was reproduced against likec4 1.60.0.
 
 | You wrote | Error (verbatim) | Fix |
 |---|---|---|

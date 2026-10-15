@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import pytest
 
 from atlas.links import classify, normalize_model, parse_fragment
+from conftest import needs_node
 
 
 @pytest.mark.parametrize(
@@ -51,8 +53,19 @@ def test_file_relative_link_uses_the_engines_relative(roots):
     # `./rel/x.py` written in architecture/sub/a.c4 → engine relative "sub/rel/x.py"
     out = classify("./rel/x.py#L2", relative="sub/rel/x.py#L2", project_root=root, model_dir=md)
     assert out == {"kind": "code", "path": "architecture/sub/rel/x.py", "line": 2}
-    up = classify("../../src/x.py", relative="../src/x.py", project_root=root, model_dir=md)
+    # one level up stays inside the model dir's parent → the engine still gives a plain relative…
+    assert classify("../x.py", relative="x.py", project_root=root, model_dir=md)["path"] == "architecture/x.py"
+    # …but leaving the model dir, LikeC4 1.60 hands back an absolute file:// URL
+    up = classify("../../src/x.py", relative=(root / "src" / "x.py").as_uri(), project_root=root, model_dir=md)
     assert up == {"kind": "code", "path": "src/x.py"}
+
+
+def test_file_url_relative_outside_the_project_is_rejected(roots):
+    root, md = roots
+    evil = classify("../../../../etc/passwd", relative="file:///etc/passwd", project_root=root, model_dir=md)
+    assert evil["kind"] == "invalid" and "path" not in evil
+    remote = classify("../x.py", relative="file://evil-host/share/x.py", project_root=root, model_dir=md)
+    assert remote["kind"] == "invalid"
 
 
 @pytest.mark.parametrize("url", ["https://likec4.dev/docs#L4", "http://example.com/x"])
@@ -93,6 +106,32 @@ def test_symlink_escape_is_rejected(roots, tmp_path):
     (root / "link").symlink_to(outside)
     out = classify("/link/x.py", relative=None, project_root=root, model_dir=md)
     assert out["kind"] == "invalid"
+
+
+@needs_node
+def test_parent_links_through_the_real_engine(tmp_path):
+    """The shape the REAL engine produces for `../` links (absolute file:// once they leave the
+    model dir) — up-links into the project become code links, escapes are refused."""
+    from atlas.engine import run_engine
+
+    root = (tmp_path / "proj").resolve()
+    md = root / "architecture"
+    (md / "sub").mkdir(parents=True)
+    (md / "likec4.config.json").write_text('{"name": "t"}')
+    (md / "sub" / "a.c4").write_text(
+        "specification { element system }\n"
+        "model {\n  a = system 'A' {\n"
+        "    link ../../src/a.py#L3 'up2'\n    link ../x.py 'up1'\n"
+        "    link ../../../../../../../../etc/passwd 'evil'\n    link ./y.py 'here'\n  }\n}\n"
+        "views { view index { include * } }\n"
+    )
+    out = run_engine(shutil.which("node"), "export", md)
+    model = normalize_model(out["model"], project_root=root, model_dir=md)
+    links = {lk["title"]: lk for lk in model["elements"]["a"]["links"]}
+    assert (links["up2"]["kind"], links["up2"]["path"], links["up2"]["line"]) == ("code", "src/a.py", 3)
+    assert links["up1"]["path"] == "architecture/x.py"
+    assert links["here"]["path"] == "architecture/sub/y.py"
+    assert links["evil"]["kind"] == "invalid" and "path" not in links["evil"]
 
 
 def test_normalize_model_covers_elements_and_view_nodes(roots):

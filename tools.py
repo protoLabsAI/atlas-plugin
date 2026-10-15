@@ -225,7 +225,7 @@ def build_tools(service, registry):
         """Check the project's architecture model (the LikeC4 .c4 files Atlas renders). Runs the
         layout engine and Atlas's lint, and returns engine errors as file:line messages plus lint
         findings: elements with children but no drill-down view, code links to files that don't
-        exist, sequence views mixing an element with its descendant, broken tour slides, and empty
+        exist, sequence views mixing an element with its descendant, broken tour slides, views with more than 12 nodes, and empty
         views. Run it after every edit to the model."""
         return await asyncio.to_thread(validate_report, service)
 

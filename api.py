@@ -100,6 +100,15 @@ def build_view_router(static_dir=None):
     return router
 
 
+TRANSITION_SPEEDS = ("slow", "normal", "fast")
+
+
+def transition_speed(conf: dict | None) -> str:
+    """The viewer's ``transition_speed`` setting — ``slow`` | ``normal`` | ``fast`` (default ``normal``)."""
+    v = str((conf or {}).get("transition_speed") or "").strip().lower()
+    return v if v in TRANSITION_SPEEDS else "normal"
+
+
 def _etag_matches(header: str | None, h: str) -> bool:
     if not header:
         return False
@@ -132,6 +141,8 @@ def build_data_router(service):
 
     @router.get("/status")
     async def _status():
-        return JSONResponse(await asyncio.to_thread(service.status), headers={"Cache-Control": "no-store"})
+        status = await asyncio.to_thread(service.status)
+        status["transition_speed"] = transition_speed(service.conf())
+        return JSONResponse(status, headers={"Cache-Control": "no-store"})
 
     return router

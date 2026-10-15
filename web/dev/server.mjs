@@ -1,5 +1,7 @@
 // Atlas viewer dev server — a stand-in for the protoAgent host + the Atlas backend.
 //   node dev/server.mjs [--port 4720] [--model <dir>] [--project-root <dir>] [--real-kit]
+//   --model defaults to ../examples/protoagent, --project-root to $ATLAS_PROJECT_ROOT or the repo;
+//   --real-kit serves the console's built kit from $PROTOAGENT_DIR/apps/web/dist/_ds.
 // Serves, at the host root AND under a fleet-style prefix (/agents/<slug>):
 //   /plugins/atlas/view               → ../static/index.html (public)
 //   /plugins/atlas/static/*           → ../static/* (public)
@@ -20,29 +22,18 @@ import { fileURLToPath } from 'node:url'
 const here = dirname(fileURLToPath(import.meta.url))
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : d }
 const PORT = Number(arg('--port', 4720))
-const MODEL_DIR = resolve(arg('--model', '/Users/kj/dev/atlas-spike/trials/skill-2'))
-const PROJECT_ROOT = resolve(arg('--project-root', '/Users/kj/dev/protoAgent'))
+const MODEL_DIR = resolve(arg('--model', resolve(here, '../../examples/protoagent')))
+const PROJECT_ROOT = resolve(arg('--project-root', process.env.ATLAS_PROJECT_ROOT || resolve(here, '../..')))
 const PROJECT = arg('--project', '')  // '' → omit `project` so the viewer resolves it via /api/fs/roots
 const STATIC = resolve(here, '../../static')
 const ENGINE = resolve(here, '../../vendor/atlas-engine.mjs')
-const REAL_KIT = '/Users/kj/dev/protoAgent/apps/web/dist/_ds'
-const KIT = process.argv.includes('--real-kit') && existsSync(REAL_KIT) ? REAL_KIT : join(here, 'kit')
-const state = { scenario: 'normal', token: '', tours: true }
+const REAL_KIT = process.env.PROTOAGENT_DIR ? join(process.env.PROTOAGENT_DIR, 'apps/web/dist/_ds') : ''
+const KIT = process.argv.includes('--real-kit') && REAL_KIT && existsSync(REAL_KIT) ? REAL_KIT : join(here, 'kit')
+const state = { scenario: 'normal', token: '', tours: true, pane: true }
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml' }
 
-const SAMPLE_TOURS = { tours: [
-  { id: 'overview', title: 'protoAgent in 5 minutes', slides: [
-    { view: 'index', note: 'The landscape: an **operator**, the protoAgent runtime, and the systems it talks to.' },
-    { view: 'index', focus: 'proto_agent', note: 'protoAgent is the system we own. Press *Enter* to open it.' },
-    { view: 'proto_agent_detail', note: 'Inside: console, API server, agent graph, tools, knowledge.' },
-    { view: 'proto_agent_detail', focus: 'proto_agent.graph', note: 'The agent graph owns the tool loop — `graph/agent.py`.' },
-    { view: 'proto_agent_graph_detail', note: 'The graph: core loop, LLM client, middleware, subagents.' },
-    { view: 'chat_turn_flow', step: 1, note: 'One chat turn: the operator sends a message.' },
-    { view: 'chat_turn_flow', step: 3, note: 'The server hands the turn to the graph — it never calls the model directly.' },
-    { view: 'chat_turn_flow', step: 5, note: 'The LLM client asks the gateway for a completion.' },
-    { view: 'index', note: 'Back out to the landscape.' },
-  ] },
-] }
+// Fallback tours for a model without its own atlas.tours.json: the bundled example's.
+const SAMPLE_TOURS = JSON.parse(readFileSync(resolve(here, '../../examples/protoagent/atlas.tours.json'), 'utf8'))
 
 async function dirHash(dir) {
   const h = createHash('sha256')
@@ -126,10 +117,12 @@ const send = (m) => f.contentWindow.postMessage(m, location.origin)
 window.addEventListener('message', (e) => {
   if (e.source !== f.contentWindow) return
   window.__msgs.push(e.data)
+  if (e.data?.type === 'protoagent:contextmenu:open') window.__menu = e.data
   if (e.data?.type === 'protoagent:ready') send({ type: 'protoagent:init', token, theme: THEMES[theme] })
 })
 f.addEventListener('load', () => send({ type: 'protoagent:init', token, theme: THEMES[theme] }))
 window.setTheme = (t) => { theme = t; send({ type: 'protoagent:theme', theme: THEMES[t] }) }
+window.menuAction = (id) => send({ type: 'protoagent:contextmenu:action', itemId: 'plugin.atlas.' + id })
 window.emit = (topic, data) => send({ type: 'protoagent:event', topic, data, seq: ++seq })
 </script></body></html>`
 }
@@ -144,6 +137,7 @@ createServer(async (req, res) => {
     if (u.pathname === '/harness.html') return send(res, 200, harness(u.searchParams), { 'Content-Type': TYPES['.html'] })
     if (u.pathname === '/__mock') {
       for (const k of ['scenario', 'token']) if (u.searchParams.has(k)) state[k] = u.searchParams.get(k)
+      if (u.searchParams.has('pane')) state.pane = u.searchParams.get('pane') === '1'
       if (u.searchParams.has('tours')) { state.tours = u.searchParams.get('tours') === '1'; cache.hash = null }
       return json(res, 200, state)
     }
@@ -156,6 +150,7 @@ createServer(async (req, res) => {
     if (path === '/_ds/plugin-kit.css' || path === '/_ds/plugin-kit.js') return send(res, 200, await readFile(join(KIT, path.slice(5))), { 'Content-Type': TYPES[extname(path)] })
     if (path.startsWith('/api/')) {
       if (state.token && req.headers.authorization !== `Bearer ${state.token}`) return json(res, 401, { detail: 'unauthorized' })
+      if (path === '/api/runtime/status') return json(res, 200, { code_pane: { enabled: state.pane } })
       if (path === '/api/fs/roots') return json(res, 200, { roots: { protoAgent: PROJECT_ROOT, other: '/tmp' } })
       if (path === '/api/plugins/atlas/status')
         return json(res, 200, { node: state.scenario === 'nonode' ? { path: '', version: '', ok: false, source: '', error: 'no node ≥ 20 on PATH' } : { path: process.execPath, version: process.version, ok: true, source: 'path' }, model_dir: MODEL_DIR, exists: state.scenario !== 'empty', engine: 'vendor/atlas-engine.mjs', engine_present: true, project: PROJECT || 'protoAgent', project_root: PROJECT_ROOT })

@@ -95,9 +95,9 @@ test('normaliseLink: raw LikeC4 links (fallback)', () => {
 
 test('resolveProject: explicit project, fs roots match, nested root, basename fallback', () => {
   assert.deepEqual(resolveProject({ project: 'app', project_root: '/r' }, null, 'a.py'), { project: 'app', path: 'a.py' })
-  const roots = { other: '/x', proto: '/Users/kj/dev/protoAgent/' }
-  assert.deepEqual(resolveProject({ project_root: '/Users/kj/dev/protoAgent' }, roots, 'a.py'), { project: 'proto', path: 'a.py' })
-  assert.deepEqual(resolveProject({ project_root: '/Users/kj/dev/protoAgent/sub' }, roots, 'a.py'), { project: 'proto', path: 'sub/a.py' })
+  const roots = { other: '/x', proto: '/home/op/protoAgent/' }
+  assert.deepEqual(resolveProject({ project_root: '/home/op/protoAgent' }, roots, 'a.py'), { project: 'proto', path: 'a.py' })
+  assert.deepEqual(resolveProject({ project_root: '/home/op/protoAgent/sub' }, roots, 'a.py'), { project: 'proto', path: 'sub/a.py' })
   assert.deepEqual(resolveProject({ project_root: '/srv/thing' }, roots, 'a.py'), { project: 'thing', path: 'a.py' })
   assert.equal(resolveProject({}, roots, 'a.py'), null)
 })

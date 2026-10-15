@@ -3,14 +3,14 @@
 Atlas is a protoAgent plugin for **drill-down architecture diagrams you can explore and present**.
 It is built on [LikeC4](https://likec4.dev) 1.60.0: one model, many views. A scoped view
 (`view x of elem`) is that element's drill-down; dynamic views are step-by-step walkthroughs.
-Spike evidence: `/Users/kj/dev/atlas-spike` (trials, embed, presenter).
+The design was proven in a throwaway spike (authoring trials, an embed, the presenter) before this repo.
 
 ## Pieces
 
 | Piece | Where | Notes |
 |---|---|---|
 | Engine | `vendor/atlas-engine.mjs` (built from `web/engine.mjs` by `npm run build:engine`) | Single-file LikeC4 parser + Graphviz-WASM layout. Needs only `node` ≥ 20. No npm at runtime. |
-| Backend | `__init__.py`, `atlas/*.py` | Python; finds node, runs the engine, serves the model, tools. |
+| Backend | `__init__.py` + flat modules (`nodes.py`, `project.py`, `engine.py`, `links.py`, `lint.py`, `api.py`, `tools.py`) | Python; finds node, runs the engine, serves the model, tools. |
 | Viewer | `web/src` → built into `static/` (committed) | React + `@likec4/diagram`; explorer + presenter. |
 | Skill | `skills/atlas/SKILL.md` | How to author LikeC4 for Atlas (tested). |
 
@@ -97,7 +97,7 @@ Node runtime install; clear the gap once node is found.
   levels; search; an element details panel (title, kind, technology, description, metadata, links —
   code links post `protoagent:code:open` to the parent so the console's code pane opens). Light/dark
   from the console theme.
-* **Present**: the spike presenter (`atlas-spike/embed/src/Presenter.tsx`) — tours, keyboard
+* **Present**: the spike's presenter, ported — tours, keyboard
   (→ ← Enter Esc Tab 1–9 N F), synced-camera zoom into nodes, speaker notes, reduced-motion fade.
 * Live reload: poll `/model` with ETag every 2 s while visible; keep the current view when it still
   exists; show an error banner (with file:line) on `ok:false` and keep rendering the last good model.

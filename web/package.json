@@ -3,9 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build:engine": "esbuild engine.mjs --bundle --platform=node --format=esm --target=node20 --outfile=../vendor/atlas-engine.mjs --log-level=warning --legal-comments=linked --alias:bundle-require=./stubs/bundle-require.mjs \"--banner:js=import{createRequire as __cr}from'module';const require=__cr(import.meta.url);\"",
+    "build:engine": "esbuild engine.mjs --bundle --platform=node --format=esm --target=node20 --outfile=../vendor/atlas-engine.mjs --log-level=warning --legal-comments=linked --metafile=build/engine-meta.json --alias:bundle-require=./stubs/bundle-require.mjs \"--banner:js=import{createRequire as __cr}from'module';const require=__cr(import.meta.url);\"",
     "build:view": "vite build",
-    "build": "npm run build:engine && npm run build:view",
+    "build": "npm run build:engine && npm run build:view && npm run notices",
+    "notices": "node scripts/notices.mjs",
     "test": "node --test \"test/*.test.mjs\""
   },
   "dependencies": {

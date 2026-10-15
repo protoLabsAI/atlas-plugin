@@ -6,31 +6,49 @@ views {
   }
 
   view proto_agent_detail of proto_agent {
-    title 'protoAgent containers'
+    title 'protoAgent subsystems'
     include *
     autoLayout LeftRight
   }
 
-  view proto_agent_graph_detail of proto_agent.graph {
-    title 'Agent graph components'
+  view proto_agent_interfaces_detail of proto_agent.interfaces {
+    title 'Interfaces'
+    include *
+    autoLayout LeftRight
+  }
+
+  view proto_agent_core_detail of proto_agent.core {
+    title 'Agent core'
+    include *
+    autoLayout LeftRight
+  }
+
+  view proto_agent_platform_detail of proto_agent.platform {
+    title 'Platform services'
+    include *
+    autoLayout LeftRight
+  }
+
+  view proto_agent_interfaces_server_detail of proto_agent.interfaces.server {
+    title 'Server components'
     include *
   }
 
-  view proto_agent_server_detail of proto_agent.server {
-    title 'Server components'
+  view proto_agent_core_graph_detail of proto_agent.core.graph {
+    title 'Agent graph components'
     include *
   }
 
   dynamic view chat_turn_flow {
     title 'Chat turn'
-    operator -> proto_agent.console 'sends message'
-    proto_agent.console -> proto_agent.server.chat 'POST chat'
-    proto_agent.server.chat -> proto_agent.graph.agent_core 'astream'
-    proto_agent.graph.agent_core -> proto_agent.graph.llm_client 'model call'
-    proto_agent.graph.llm_client -> gateway 'completion'
-    proto_agent.graph.agent_core -> proto_agent.tools 'tool call'
-    proto_agent.graph.agent_core -> proto_agent.graph.checkpointer 'persist'
-    proto_agent.server.chat <- proto_agent.graph.agent_core 'final answer'
-    proto_agent.console <- proto_agent.server.chat 'SSE stream'
+    operator -> proto_agent.interfaces.console 'sends message'
+    proto_agent.interfaces.console -> proto_agent.interfaces.server.chat 'POST chat'
+    proto_agent.interfaces.server.chat -> proto_agent.core.graph.agent_core 'astream'
+    proto_agent.core.graph.agent_core -> proto_agent.core.graph.llm_client 'model call'
+    proto_agent.core.graph.llm_client -> gateway 'completion'
+    proto_agent.core.graph.agent_core -> proto_agent.core.tools 'tool call'
+    proto_agent.core.graph.agent_core -> proto_agent.core.graph.checkpointer 'persist'
+    proto_agent.interfaces.server.chat <- proto_agent.core.graph.agent_core 'final answer'
+    proto_agent.interfaces.console <- proto_agent.interfaces.server.chat 'SSE stream'
   }
 }

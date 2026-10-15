@@ -167,6 +167,13 @@ def gap_message(info: NodeInfo) -> str:
     )
 
 
+def install_failed_message(error: str) -> str:
+    return (
+        f"Installing the Node runtime for Atlas failed: {error or 'unknown error'}. Retry, or "
+        "point Atlas at a Node.js 20+ in its settings."
+    )
+
+
 class NodeGap:
     """Reports / clears the ``node`` setup gap — only on a change, so a 2 s poll doesn't spam."""
 
@@ -193,7 +200,16 @@ class NodeGap:
         with self._lock:
             if self.install.get("state") == "running":
                 return  # the install thread owns the banner until it finishes
-            want = "" if info.ok else gap_message(info)
+            if info.ok:
+                want = ""
+                if self.install.get("state") == "error":
+                    self.install = {"state": "idle", "pct": 0, "error": ""}
+            elif self.install.get("state") == "error":
+                # Keep saying WHY the one-click install failed until a node turns up — the
+                # generic "no node" text would hide it on the next poll.
+                want = install_failed_message(self.install.get("error", ""))
+            else:
+                want = gap_message(info)
             if want == self._last:
                 return
             self._last = want
@@ -242,11 +258,9 @@ class NodeGap:
                 log.exception("[atlas] managed node install failed")
                 with self._lock:
                     self.install = {"state": "error", "pct": 0, "error": str(exc)}
-            info = recheck()
-            if not info.ok and self.install.get("error"):
-                self._report(f"Installing the Node runtime failed: {self.install['error']}", action=_gap_actions())
-                with self._lock:
-                    self._last = None
+            with self._lock:
+                self._last = None
+            recheck()  # clears the gap, or (state "error") re-reports the failure with Retry
 
         self._report("Installing the Node runtime for Atlas…")
         threading.Thread(target=_run, name="atlas-node-install", daemon=True).start()

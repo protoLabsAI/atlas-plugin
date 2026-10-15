@@ -34,11 +34,9 @@ code { font-family: var(--pl-font-mono, ui-monospace, monospace); font-size: .92
 .crumb button:hover { background: var(--a-hover); color: var(--pl-color-fg, #ededed) }
 .crumb button.here { color: var(--pl-color-fg, #ededed); font-weight: 600 }
 .sp { flex: 1 1 0; min-width: 4px }
-.viewpick, .search input, .p-tour { font: inherit; font-size: 12px; height: 28px; padding: 0 8px; border-radius: var(--pl-radius, 6px);
-  background: var(--a-raised); color: var(--pl-color-fg, #ededed); border: 1px solid var(--a-border); outline: none; max-width: 30ch }
-.viewpick:focus, .search input:focus, .p-tour:focus { border-color: var(--a-accent) }
+.bar .pl-input, .p-tour { height: 28px; padding: 0 8px; font-size: 12px; width: auto; max-width: 30ch }
+.search input.pl-input { width: 22ch }
 .search { position: relative }
-.search input { width: 22ch }
 .hits { position: absolute; right: 0; top: 32px; z-index: 30; list-style: none; margin: 0; padding: 4px; width: 340px; max-height: 60vh; overflow: auto;
   background: var(--a-raised); border: 1px solid var(--a-border); border-radius: 8px; box-shadow: var(--a-shadow) }
 .hits button { display: flex; width: 100%; gap: 8px; align-items: baseline; text-align: left; background: none; border: 0; padding: 6px 8px; border-radius: 5px; cursor: pointer }
@@ -46,18 +44,14 @@ code { font-family: var(--pl-font-mono, ui-monospace, monospace); font-size: .92
 .h-title { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 .h-sub { color: var(--a-muted); font-size: 11px; margin-left: auto; white-space: nowrap }
 .nohit { padding: 6px 8px }
-.pl-btn { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; font-size: 12px; cursor: pointer;
-  border-radius: var(--pl-radius, 6px); border: 1px solid var(--a-border); background: var(--a-raised); color: var(--pl-color-fg, #ededed); white-space: nowrap }
-.pl-btn:hover { border-color: var(--a-accent) }
-.present-btn { background: var(--a-accent); border-color: var(--a-accent); color: var(--pl-color-bg, #0a0a0c); font-weight: 600 }
+.bar .pl-btn, .canvas-tools .pl-btn { height: 28px }
+.canvas-tools .pl-btn { background: var(--a-raised) }
 .linkish { background: none; border: 0; padding: 0; color: var(--a-accent); cursor: pointer; text-align: left }
 .linkish:hover { text-decoration: underline }
 
 /* banners */
-.banner { padding: 6px 12px; font-size: 12px; border-bottom: 1px solid var(--a-border); flex: 0 0 auto }
-.banner-error { background: var(--a-error-bg); border-bottom-color: color-mix(in srgb, var(--a-error) 35%, transparent) }
-.banner-error strong { color: var(--a-error) }
-.banner-warn { color: var(--a-muted) }
+.banner { border-radius: 0; border-width: 0 0 1px; padding: 6px 12px; font-size: 12px; flex: 0 0 auto }
+.banner-error strong, .pl-banner--error strong { color: var(--a-error) }
 .banner.compact { position: absolute; top: 44px; left: 50%; transform: translateX(-50%); z-index: 20; border-radius: 8px; border: 1px solid var(--a-border); max-width: min(900px, calc(100% - 32px)) }
 .b-row { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap }
 .b-sub { color: var(--a-muted) }
@@ -81,9 +75,8 @@ code { font-family: var(--pl-font-mono, ui-monospace, monospace); font-size: .92
 .details h3 { margin: 16px 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--a-muted); font-weight: 600 }
 .d-kind { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--a-muted) }
 .d-kind .linkish { text-transform: none; letter-spacing: 0; font-size: 12px }
-.d-close { position: absolute; top: 10px; right: 10px; width: 26px; height: 26px; border: 0; border-radius: 5px; background: none; cursor: pointer; color: var(--a-muted); font-size: 17px }
-.d-close:hover { background: var(--a-hover); color: var(--pl-color-fg, #ededed) }
-.d-tech { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--a-border); color: var(--a-muted); margin-bottom: 6px }
+.d-close { position: absolute; top: 8px; right: 8px; font-size: 16px }
+.d-tech { margin-bottom: 6px }
 .d-summary p, .d-desc p { margin: 6px 0 }
 .d-desc { color: var(--a-muted) }
 .d-drill { margin-top: 10px }
@@ -91,6 +84,11 @@ code { font-family: var(--pl-font-mono, ui-monospace, monospace); font-size: .92
 .d-code, .d-web { display: grid; grid-template-columns: 18px 1fr; gap: 0 6px; width: 100%; text-align: left; padding: 6px 8px; border-radius: 6px;
   border: 1px solid var(--a-border); background: var(--pl-color-bg, #0a0a0c); cursor: pointer; text-decoration: none; color: inherit }
 .d-code:hover, .d-web:hover { border-color: var(--a-accent) }
+.d-code-row { display: grid; gap: 4px }
+.d-code-actions { display: flex; gap: 4px; justify-content: flex-end }
+.d-hint { margin: 0 0 6px; font-size: 12px; color: var(--a-muted) }
+code.coderef { cursor: pointer; color: var(--a-accent); text-decoration: underline; text-underline-offset: 2px; text-decoration-color: color-mix(in srgb, var(--a-accent) 45%, transparent) }
+code.coderef:hover { text-decoration-color: var(--a-accent) }
 .d-ico { grid-row: span 2; color: var(--a-accent); text-align: center }
 .d-ltitle { font-weight: 500 }
 .d-code code { color: var(--a-muted); font-size: 11px; overflow-wrap: anywhere }
@@ -99,19 +97,21 @@ code { font-family: var(--pl-font-mono, ui-monospace, monospace); font-size: .92
 .d-meta div { display: grid; grid-template-columns: minmax(70px, 35%) 1fr; gap: 8px }
 .d-meta dt { color: var(--a-muted) } .d-meta dd { margin: 0; overflow-wrap: anywhere }
 .d-tags { display: flex; flex-wrap: wrap; gap: 4px }
-.tag { font-size: 11px; padding: 1px 7px; border-radius: 999px; background: var(--a-hover); color: var(--a-muted) }
+
 .details footer { margin-top: 18px } .d-fqn { color: var(--a-muted); font-size: 11px }
 
 /* states */
 .state { flex: 1; display: grid; place-items: center; padding: 24px; overflow: auto }
-.state-card { max-width: 520px; text-align: center; color: var(--pl-color-fg, #ededed) }
+.state-card { max-width: 520px; text-align: center; display: grid; justify-items: center; gap: 4px }
+.state-card .pl-empty__desc { max-width: 52ch }
 .state-card.wide { max-width: 760px; text-align: left }
-.state-card h1 { font-size: 19px; margin: 8px 0 }
-.state-card p { margin: 8px 0 }
-.state-icon { font-size: 30px; color: var(--a-accent) }
+.state-card h1 { margin: 4px 0 }
+.state-card p { margin: 4px 0 }
+.state-icon { font-size: 26px; color: var(--a-accent) }
 .state .b-list { max-height: none; margin-top: 12px }
 
-.toast { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 40; padding: 8px 14px; border-radius: 8px;
+.atlas-toasts { left: 50%; bottom: 18px; transform: translateX(-50%) }
+.p-toast { position: absolute; top: 52px; left: 50%; transform: translateX(-50%); z-index: 20; padding: 6px 12px; border-radius: var(--pl-radius, 6px);
   background: var(--a-raised); border: 1px solid var(--a-border); box-shadow: var(--a-shadow); font-size: 12px }
 
 /* presenter */

@@ -202,17 +202,19 @@ def test_install_failure_reraises_the_gap_with_retry(registry, monkeypatch):
 
     def recheck():
         gap.update(bad)
+        done.set()
         return bad
 
-    orig = gap._report
-
-    def spy(message, action=None):
-        orig(message, action)
-        if message and "failed" in message:
-            done.set()
-
-    gap._report = spy
     gap.start_install(recheck)
     assert done.wait(5)
     last = registry.gaps[-1]
     assert "checksum mismatch" in last["message"] and last["action"][0]["kind"] == "plugin_setup"
+    # the next poll still finds no node — the failure stays on the banner (not the generic text)
+    n = len(registry.gaps)
+    gap.update(bad)
+    assert len(registry.gaps) == n
+    # …until a node turns up, which clears it and forgets the failure
+    gap.update(nodes.NodeInfo(path="/n", version="v22.0.0", ok=True, source="path"))
+    assert registry.gaps[-1]["message"] is None and gap.install["state"] == "idle"
+    gap.update(bad)
+    assert "Node.js 20" in registry.gaps[-1]["message"]

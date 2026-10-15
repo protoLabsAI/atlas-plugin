@@ -5,9 +5,11 @@
 errors; non-zero means the engine itself crashed. It always runs as ``<absolute node>
 <engine> …`` (never via a shebang), in a subprocess with a timeout, off the event loop.
 
-The cache is keyed by a hash of the model dir's files (path + mtime + size), so the viewer's
-2 s ETag poll costs one directory walk. Exports for one dir are serialised by a lock, so a burst
-of requests runs the engine once. The last GOOD export is kept in memory and in the plugin's
+The cache is keyed by a hash of exactly the files the engine reads (path + mtime + size), so the
+viewer's 2 s ETag poll costs one directory walk. A model dir whose config ``include`` or a symlink
+reaches outside it is refused before the engine runs. Exports for one (project, model dir) are
+serialised by a lock, so a burst of requests runs the engine once; a crashing or timing-out
+engine is retried with backoff, not on every poll. The last GOOD export is kept in memory and in the plugin's
 store (``sdk.plugin_store``): while the sources have errors, ``/model`` keeps serving it with
 ``ok:false, stale:true`` and the errors, so the diagram never blanks mid-edit.
 """
@@ -34,8 +36,6 @@ ROOT = Path(__file__).resolve().parent
 ENGINE = ROOT / "vendor" / "atlas-engine.mjs"
 ENGINE_REL = "vendor/atlas-engine.mjs"
 TIMEOUT = 20.0
-_SKIP_DIRS = {"node_modules", ".git", ".likec4", "dist", "__pycache__", ".venv"}
-_MAX_FILES = 5000
 
 
 class EngineError(RuntimeError):
@@ -71,25 +71,115 @@ def run_engine(node: str, command: str, model_dir: Path, *, timeout: float = TIM
     return out
 
 
-def dir_hash(model_dir: Path, *salt: str) -> str:
-    """A short hash of every file under the model dir (relative path + mtime_ns + size), plus
-    ``salt`` (project root, engine stamp). Changes whenever a file is added/removed/edited."""
+# What the engine reads (LikeC4 1.60 language-server): every file with a LikeC4 extension under
+# the workspace, recursively, following symlinks, skipping only these directory names — plus the
+# project config. Hashing exactly that set means an edit the engine would see always changes the
+# hash, and nothing the engine ignores (a build dir, an editor swap file) busts the cache.
+_ENGINE_SKIP_DIRS = {"node_modules", ".git", ".svn", ".yarn", ".pnpm"}
+_LIKEC4_EXTS = (".c4", ".likec4", ".like-c4")
+_JSON_CONFIGS = {"likec4.config.json", ".likec4rc", ".likec4.config.json"}
+_MAX_FILES = 5000
+MAX_ERROR_CHARS = 300
+NODE_RETRY = 5.0  # s before re-probing for node after "none found"
+ENGINE_RETRY = 5.0  # s before re-running a crashed / timed-out engine (doubles per failure)
+BACKOFF_MAX = 60.0
+
+
+def _clip(msg: str, limit: int = MAX_ERROR_CHARS) -> str:
+    msg = str(msg or "")
+    return msg if len(msg) <= limit else msg[: limit - 1].rstrip() + "…"
+
+
+def _is_engine_input(name: str) -> bool:
+    if name == L.TOURS_FILE or name in _JSON_CONFIGS or name.startswith("likec4.config."):
+        return True
+    return any(name.endswith(ext) and name != ext for ext in _LIKEC4_EXTS)
+
+
+def _inside(child: Path, parent: Path) -> bool:
+    return child == parent or parent in child.parents
+
+
+def _check_include(config: Path, model_root: Path) -> str | None:
+    """A config's ``include.paths`` must stay inside the model dir — otherwise the engine would
+    read (and render) arbitrary ``.c4`` files from elsewhere on disk. Returns the problem, if any."""
+    try:
+        text = config.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    try:
+        doc = json.loads(text)
+    except json.JSONDecodeError:
+        # The engine reads JSON5; if plain JSON can't parse it we can't vet an include — refuse it.
+        return f"{config.name}: can't verify its `include` (not strict JSON)" if "include" in text else None
+    inc = doc.get("include") if isinstance(doc, dict) else None
+    if inc is None:
+        return None
+    paths = inc.get("paths") if isinstance(inc, dict) else inc
+    if not isinstance(paths, list):
+        return f'{config.name}: `include` must be {{"paths": [...]}}'
+    for raw in paths:
+        if not isinstance(raw, str):
+            return f"{config.name}: include path {raw!r} is not a string"
+        target = (config.parent / raw).resolve()
+        if not _inside(target, model_root):
+            return f"{config.name}: include path {raw!r} leaves the model directory — Atlas only reads the model's own folder"
+    return None
+
+
+def scan_model_dir(model_dir: Path) -> tuple[list[str], list[str]]:
+    """``(entries, problems)`` — one ``path\\0mtime\\0size`` entry per file the engine reads, and
+    reasons the model must not be handed to the engine (an ``include`` or a symlink leaving the
+    model dir, too many files)."""
+    root = model_dir.resolve()
+    entries: list[str] = []
+    problems: list[str] = []
+    seen_dirs: set[Path] = set()
+    for dirpath, dirnames, filenames in os.walk(model_dir, followlinks=True):
+        here = Path(dirpath)
+        real = here.resolve()
+        if not _inside(real, root):
+            problems.append(f"{here.relative_to(model_dir).as_posix()} is a symlink leaving the model directory")
+            dirnames[:] = []
+            continue
+        if real in seen_dirs:  # a symlink loop
+            dirnames[:] = []
+            continue
+        seen_dirs.add(real)
+        dirnames[:] = sorted(d for d in dirnames if d not in _ENGINE_SKIP_DIRS)
+        for name in sorted(filenames):
+            if not _is_engine_input(name):
+                continue
+            p = here / name
+            try:
+                rp = p.resolve()
+                st = p.stat()
+            except OSError:
+                continue
+            rel = p.relative_to(model_dir).as_posix()
+            if not _inside(rp, root):
+                problems.append(f"{rel} is a symlink leaving the model directory")
+                continue
+            if name in _JSON_CONFIGS:
+                bad = _check_include(p, root)
+                if bad:
+                    problems.append(f"{rel.rsplit('/', 1)[0] + '/' if '/' in rel else ''}{bad}")
+            entries.append(f"{rel}\0{st.st_mtime_ns}\0{st.st_size}")
+            if len(entries) > _MAX_FILES:
+                problems.append(f"the model directory holds more than {_MAX_FILES} model files")
+                return entries, problems
+    return entries, problems
+
+
+def dir_hash(model_dir: Path, *salt: str, entries: list[str] | None = None) -> str:
+    """A short hash of the engine's inputs under the model dir (relative path + mtime_ns + size),
+    plus ``salt`` (project root, engine stamp). Changes whenever an input is added/removed/edited."""
+    if entries is None:
+        entries = scan_model_dir(model_dir)[0]
     h = hashlib.sha256()
     for s in salt:
         h.update(s.encode())
         h.update(b"\0")
-    entries = []
-    for dirpath, dirnames, filenames in os.walk(model_dir):
-        dirnames[:] = sorted(d for d in dirnames if d not in _SKIP_DIRS and not d.startswith("."))
-        for name in filenames:
-            p = Path(dirpath) / name
-            try:
-                st = p.stat()
-            except OSError:
-                continue
-            entries.append(f"{p.relative_to(model_dir).as_posix()}\0{st.st_mtime_ns}\0{st.st_size}")
-            if len(entries) >= _MAX_FILES:
-                break
     for e in sorted(entries):
         h.update(e.encode())
         h.update(b"\n")
@@ -111,6 +201,7 @@ def _rel_errors(errors, project_root: Path, model_dir: Path) -> list[dict]:
         if not isinstance(e, dict):
             continue
         e = dict(e)
+        e["message"] = _clip(e.get("message"))  # a parser error can list every expected token (~170 KB)
         f = e.get("file")
         if isinstance(f, str) and f:
             p = Path(f)
@@ -137,8 +228,8 @@ class AtlasService:
         self.timeout = timeout
         self._locks: dict[str, threading.Lock] = {}
         self._locks_guard = threading.Lock()
-        self._entries: dict[str, dict] = {}  # model_dir → {"hash", "payload", "current"}
-        self._last_good: dict[str, dict] = {}  # model_dir → {"model", "tours", "hash", "ms"}
+        self._entries: dict[str, dict] = {}  # key → {"hash", "payload", "current", "retry_at"?}
+        self._last_good: dict[str, dict] = {}  # key → {"model", "tours", "hash", "ms"}
 
     # ── config / resolution ────────────────────────────────────────────────────────────────
 
@@ -172,19 +263,22 @@ class AtlasService:
             "project_root": str(project.root),
         }
 
-    # ── last good (memory + store) ─────────────────────────────────────────────────────────
+    # ── last good (memory + store), keyed by (project root, model dir) ─────────────────────
 
-    def _store_path(self, model_dir: Path) -> Path | None:
+    @staticmethod
+    def _key(project: ProjectRef, model_dir: Path) -> str:
+        return f"{project.root}\0{model_dir}"
+
+    def _store_path(self, key: str) -> Path | None:
         if self.store_dir is None:
             return None
-        key = hashlib.sha256(str(model_dir).encode()).hexdigest()[:16]
-        return Path(self.store_dir) / "last_good" / f"{key}.json"
+        digest = hashlib.sha256(key.encode()).hexdigest()[:16]
+        return Path(self.store_dir) / "last_good" / f"{digest}.json"
 
-    def last_good(self, model_dir: Path) -> dict | None:
-        key = str(model_dir)
+    def last_good(self, key: str) -> dict | None:
         if key in self._last_good:
             return self._last_good[key]
-        path = self._store_path(model_dir)
+        path = self._store_path(key)
         if path is not None and path.is_file():
             try:
                 doc = json.loads(path.read_text(encoding="utf-8"))
@@ -195,9 +289,9 @@ class AtlasService:
                 log.warning("[atlas] unreadable last-good cache %s", path)
         return None
 
-    def _save_good(self, model_dir: Path, good: dict) -> None:
-        self._last_good[str(model_dir)] = good
-        path = self._store_path(model_dir)
+    def _save_good(self, key: str, good: dict) -> None:
+        self._last_good[key] = good
+        path = self._store_path(key)
         if path is None:
             return
         try:
@@ -210,9 +304,9 @@ class AtlasService:
 
     # ── the model ─────────────────────────────────────────────────────────────────────────
 
-    def _lock_for(self, model_dir: Path) -> threading.Lock:
+    def _lock_for(self, key: str) -> threading.Lock:
         with self._locks_guard:
-            return self._locks.setdefault(str(model_dir), threading.Lock())
+            return self._locks.setdefault(key, threading.Lock())
 
     def _payload(self, *, ok, errors, model, tours, h, model_dir, project, ms, stale, exists=True) -> dict:
         return {
@@ -229,14 +323,16 @@ class AtlasService:
             "stale": stale,
         }
 
-    def _failure(self, message: str, *, kind: str, h: str, model_dir: Path, project: ProjectRef) -> dict:
-        """A payload for a failure that isn't the model's fault (no node, an engine crash) —
-        serving the last good model when there is one. Never cached; its hash carries ``kind``
+    def _failure(
+        self, messages: list[str], *, kind: str, h: str, key: str, model_dir: Path, project: ProjectRef
+    ) -> dict:
+        """A payload for a failure that isn't a model error (no node, an engine crash, a model dir
+        Atlas refuses) — serving the last good model when there is one. Its hash carries ``kind``
         so a client holding the ETag refetches once the failure clears."""
-        good = self.last_good(model_dir)
+        good = self.last_good(key)
         return self._payload(
             ok=False,
-            errors=[{"message": message}],
+            errors=[{"message": _clip(m)} for m in messages],
             model=good["model"] if good else None,
             tours=good.get("tours") if good else None,
             h=f"{h}-{kind}",
@@ -255,8 +351,28 @@ class AtlasService:
         errors (for lint/describe), else the last good one."""
         return self._get()
 
+    def _cached(self, key: str, h: str):
+        entry = self._entries.get(key)
+        if not entry or entry["hash"] != h:
+            return None
+        if entry.get("retry_at") is not None and time.monotonic() >= entry["retry_at"]:
+            return None  # a transient failure whose backoff has elapsed — try again
+        return entry["payload"], entry["current"]
+
+    def _remember(self, key: str, h: str, payload: dict, current, *, retry_in: float | None = None) -> None:
+        prev = self._entries.get(key)
+        failures = (prev.get("failures", 0) + 1) if (retry_in is not None and prev and prev["hash"] == h) else 1
+        entry = {"hash": h, "payload": payload, "current": current}
+        if retry_in is not None:
+            # Back off a failing engine: 5 s, 10 s, 20 s … up to a minute, per unchanged sources —
+            # so a 2 s poll can't re-run a crashing (or 20 s-timeout) engine back to back.
+            entry["failures"] = failures
+            entry["retry_at"] = time.monotonic() + min(retry_in * (2 ** (failures - 1)), BACKOFF_MAX)
+        self._entries[key] = entry
+
     def _get(self) -> tuple[dict, dict | None]:
         project, model_dir = self.locate()
+        key = self._key(project, model_dir)
         if not model_dir.is_dir():
             payload = self._payload(
                 ok=False,
@@ -267,7 +383,7 @@ class AtlasService:
                 ],
                 model=None,
                 tours=None,
-                h="missing-" + hashlib.sha256(str(model_dir).encode()).hexdigest()[:12],
+                h="missing-" + hashlib.sha256(key.encode()).hexdigest()[:12],
                 model_dir=model_dir,
                 project=project,
                 ms=0,
@@ -275,30 +391,41 @@ class AtlasService:
                 exists=False,
             )
             return payload, None
-        h = dir_hash(model_dir, str(project.root), project.name, _engine_stamp(self.engine))
-        key = str(model_dir)
-        entry = self._entries.get(key)
-        if entry and entry["hash"] == h:
-            return entry["payload"], entry["current"]
-        with self._lock_for(model_dir):
-            entry = self._entries.get(key)
-            if entry and entry["hash"] == h:  # another request exported it while we waited
-                return entry["payload"], entry["current"]
+        entries, problems = scan_model_dir(model_dir)
+        h = dir_hash(model_dir, str(project.root), project.name, _engine_stamp(self.engine), entries=entries)
+        hit = self._cached(key, h)
+        if hit:
+            return hit
+        with self._lock_for(key):
+            hit = self._cached(key, h)
+            if hit:  # another request exported it while we waited
+                return hit
+            if problems:
+                payload = self._failure(problems, kind="refused", h=h, key=key, model_dir=model_dir, project=project)
+                self._remember(key, h, payload, None)
+                return payload, None
             node = self.node()
             if not node.ok:
-                return self._failure(
-                    f"Node.js 20+ not found ({node.error}) — install the managed Node runtime from the setup banner, or set Atlas's Node.js path.",
+                payload = self._failure(
+                    [
+                        f"Node.js 20+ not found ({node.error}) — install the managed Node runtime from the setup banner, or set Atlas's Node.js path."
+                    ],
                     kind="nonode",
                     h=h,
+                    key=key,
                     model_dir=model_dir,
                     project=project,
-                ), None
+                )
+                self._remember(key, h, payload, None, retry_in=NODE_RETRY)
+                return payload, None
             started = time.monotonic()
             try:
                 raw = run_engine(node.path, "export", model_dir, timeout=self.timeout, engine=self.engine)
             except EngineError as exc:
                 log.warning("[atlas] engine failed on %s: %s", model_dir, exc)
-                return self._failure(str(exc), kind="engine", h=h, model_dir=model_dir, project=project), None
+                payload = self._failure([str(exc)], kind="engine", h=h, key=key, model_dir=model_dir, project=project)
+                self._remember(key, h, payload, None, retry_in=ENGINE_RETRY)
+                return payload, None
             ms = int(raw.get("ms") or (time.monotonic() - started) * 1000)
             model = raw.get("model") if isinstance(raw.get("model"), dict) else None
             if model is not None:
@@ -308,7 +435,7 @@ class AtlasService:
             tour_errors = _rel_errors(tour_errors, project.root, model_dir)
             engine_ok = bool(raw.get("ok")) and model is not None
             if engine_ok:
-                self._save_good(model_dir, {"model": model, "tours": tours, "hash": h, "ms": ms})
+                self._save_good(key, {"model": model, "tours": tours, "hash": h, "ms": ms})
                 payload = self._payload(
                     ok=not tour_errors,
                     errors=tour_errors,
@@ -321,7 +448,7 @@ class AtlasService:
                     stale=False,
                 )
             else:
-                good = self.last_good(model_dir)
+                good = self.last_good(key)
                 payload = self._payload(
                     ok=False,
                     errors=errors + tour_errors,
@@ -333,8 +460,8 @@ class AtlasService:
                     ms=ms,
                     stale=good is not None,
                 )
-            current = model if model is not None else (self.last_good(model_dir) or {}).get("model")
-            self._entries[key] = {"hash": h, "payload": payload, "current": current, "tours": tours}
+            current = model if model is not None else (self.last_good(key) or {}).get("model")
+            self._remember(key, h, payload, current)
             return payload, current
 
     def current_tours(self) -> dict | None:

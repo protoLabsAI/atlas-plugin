@@ -4,10 +4,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Details } from './Details'
 import { Explorer, type ExploreCmd } from './Explorer'
 import { Presenter, type PresenterCmd, type Tour } from './Presenter'
-import { BASE, currentScheme, embedded, post, subscribeBus, type Kit } from './host'
+import { BASE, currentScheme, embedded, fromParent, post, subscribeBus, type Kit } from './host'
+import { setSpeed } from './motion'
+import { themeFor } from './theme'
 import {
-  codeOpenMessage, displayFile, dynamicSteps, errorFileRel, keepView, parseShow, resolveProject,
-  searchModel, slideForView, toursFor, viewChain, viewForElement, viewOptions,
+  codeOpenMessage, codeRoute, displayFile, dynamicSteps, errorFileRel, keepView, keyCombo, nodeMenuItems, normaliseLinks,
+  parseShow, resolveProject, scopedViewOf, searchModel, shouldForwardKey, slideForView, toursFor, viewChain, viewForElement, viewOptions,
 } from './logic.mjs'
 
 const POLL_MS = 2000
@@ -16,20 +18,28 @@ type Status = { node?: { ok?: boolean; path?: string; version?: string; source?:
 
 // ---------------------------------------------------------------- theme
 function useScheme(kit: Kit) {
-  const [scheme, setScheme] = useState<'light' | 'dark'>(() => currentScheme())
+  const [state, setState] = useState<{ scheme: 'light' | 'dark'; css: string }>(() => {
+    const scheme = currentScheme()
+    return { scheme, css: themeFor(scheme) }
+  })
   useEffect(() => {
+    let mode: string | null = null // the console's `mode` (newer hosts send it with the theme)
     const apply = () => {
-      const s = currentScheme()
-      setScheme(s)
+      const s = mode === 'light' || mode === 'dark' ? mode : currentScheme()
       const root = document.documentElement
       if (root.style.colorScheme !== s) root.style.colorScheme = s // form controls + scrollbars
       if (root.dataset.scheme !== s) root.dataset.scheme = s
+      const css = themeFor(s)
+      setState((prev) => (prev.scheme === s && prev.css === css ? prev : { scheme: s, css }))
     }
     apply()
     // the kit re-sets --pl-* on :root (inline style) on init + every live re-theme
     const mo = new MutationObserver(apply)
     mo.observe(document.documentElement, { attributes: true, attributeFilter: ['style', 'class', 'data-theme'] })
-    kit.initPluginView(() => apply())
+    kit.initPluginView((x: any) => {
+      if (x?.theme && typeof x.theme.mode === 'string') mode = x.theme.mode
+      apply()
+    })
     // the kit stylesheet loads async: re-read once it lands
     const link = document.querySelector('link[href$="/_ds/plugin-kit.css"]')
     link?.addEventListener('load', apply)
@@ -41,7 +51,7 @@ function useScheme(kit: Kit) {
       mq?.removeEventListener?.('change', apply)
     }
   }, [kit])
-  return scheme
+  return state
 }
 
 // ---------------------------------------------------------------- model polling
@@ -58,7 +68,11 @@ function useAtlasData(kit: Kit) {
   const loadStatus = useCallback(async () => {
     try {
       const r = await kit.apiFetch('/api/plugins/atlas/status', { cache: 'no-store' })
-      if (r.ok) setStatus(await r.json())
+      if (r.ok) {
+        const st = await r.json()
+        setStatus(st)
+        setSpeed(st?.transition_speed)
+      }
     } catch {
       /* older backend: no status route */
     }
@@ -136,7 +150,7 @@ function useAtlasData(kit: Kit) {
 type Mode = { kind: 'explore' } | { kind: 'present'; tour: string; start: number; nonce: number }
 
 export function App({ kit }: { kit: Kit }) {
-  const scheme = useScheme(kit)
+  const { scheme, css: themeCss } = useScheme(kit)
   const { resp, status, net, model, modelError } = useAtlasData(kit)
   const data = model?.data
   const tours: Tour[] = useMemo(() => (data ? toursFor(resp?.tours, data) : []), [data, resp?.tours])
@@ -181,10 +195,34 @@ export function App({ kit }: { kit: Kit }) {
     window.setTimeout(() => setToast((x) => (x === t ? null : x)), 3500)
   }, [])
 
-  // ---- code links → the console's code pane
+  // ---- code links → core's code pane (click) or the operator's editor (⌘/Ctrl-click)
+  // Pane availability: GET /api/runtime/status → code_pane.enabled (null = unknown/older host).
+  const [paneOn, setPaneOn] = useState<boolean | null>(null)
+  useEffect(() => {
+    const check = async () => {
+      try {
+        const r = await kit.apiFetch('/api/runtime/status', { cache: 'no-store' })
+        if (!r.ok) return
+        const v = (await r.json())?.code_pane?.enabled
+        setPaneOn(typeof v === 'boolean' ? v : null)
+      } catch {
+        /* older host: keep unknown */
+      }
+    }
+    void check()
+    kit.initPluginView(() => void check())
+    const onVis = () => document.visibilityState === 'visible' && void check()
+    window.addEventListener('focus', onVis)
+    document.addEventListener('visibilitychange', onVis)
+    return () => {
+      window.removeEventListener('focus', onVis)
+      document.removeEventListener('visibilitychange', onVis)
+    }
+  }, [kit])
+
   const rootsRef = useRef<Record<string, string> | null | undefined>(undefined)
   const openCode = useCallback(
-    async (link: any, note: string) => {
+    async (link: any, note: string, mods?: { metaKey?: boolean; ctrlKey?: boolean } | 'pane' | 'editor') => {
       let roots = rootsRef.current
       if (!resp?.project && roots === undefined) {
         try {
@@ -195,8 +233,9 @@ export function App({ kit }: { kit: Kit }) {
         }
         rootsRef.current = roots
       }
+      const how = mods === 'pane' || mods === 'editor' ? (mods === 'pane' && paneOn === false ? 'editor' : mods) : codeRoute(mods, paneOn)
       const target = resolveProject(resp, roots, link.path)
-      const msg = codeOpenMessage(target, link, note)
+      const msg = codeOpenMessage(target, link, note, how)
       const label = target ? `${target.project}/${target.path}${link.line ? `:${link.line}` : ''}` : link.path
       if (msg && post(msg)) return
       try {
@@ -206,7 +245,20 @@ export function App({ kit }: { kit: Kit }) {
         showToast(label)
       }
     },
-    [kit, resp, showToast],
+    [kit, resp, paneOn, showToast],
+  )
+  /** Click on a `code` file reference rendered by mdLight({codeRefs}) (descriptions, notes). */
+  const onCodeRefClick = useCallback(
+    (e: React.MouseEvent | React.KeyboardEvent) => {
+      const el = (e.target as HTMLElement).closest?.('.coderef') as HTMLElement | null
+      if (!el) return
+      if ('key' in e && e.key !== 'Enter' && e.key !== ' ') return
+      e.preventDefault()
+      const line = Number(el.dataset.line) || undefined
+      const end = Number(el.dataset.endLine) || undefined
+      void openCode({ kind: 'code', path: el.dataset.path, line, endLine: end, title: el.dataset.path }, '', e as any)
+    },
+    [openCode],
   )
 
   // ---- presenter
@@ -273,7 +325,9 @@ export function App({ kit }: { kit: Kit }) {
   useEffect(() => {
     let lastSeq = 0
     const onMsg = (e: MessageEvent) => {
+      if (!fromParent(e)) return // only the console frame, at its origin
       const m = e.data
+      if (m?.type === 'protoagent:contextmenu:action') return menuRef.current(String(m.itemId ?? '').split('.').pop() ?? '')
       if (!m || m.type !== 'protoagent:event') return
       if (typeof m.seq === 'number') {
         if (m.seq <= lastSeq) return
@@ -286,6 +340,54 @@ export function App({ kit }: { kit: Kit }) {
     kit.initPluginView(() => subscribeBus())
     return () => window.removeEventListener('message', onMsg)
   }, [kit])
+
+  // ---- node context menu → the console's menu (protoagent:contextmenu:open / :action)
+  const menuFor = useRef<string | null>(null)
+  const menuRef = useRef<(id: string) => void>(() => {})
+  menuRef.current = (id: string) => {
+    const fqn = menuFor.current
+    if (!fqn || !data?.elements?.[fqn]) return
+    const el = data.elements[fqn]
+    const code = normaliseLinks(el.links).find((l: any) => l.kind === 'code')
+    if (id === 'view' && code) void openCode(code, el.title || fqn, 'pane')
+    else if (id === 'editor' && code) void openCode(code, el.title || fqn, 'editor')
+    else if (id === 'details') setSelected(fqn)
+    else if (id === 'drill') {
+      const node = data.views?.[viewId ?? '']?.nodes?.find((n: any) => n.id === fqn)
+      const to = node?.navigateTo ?? scopedViewOf(data, fqn)
+      if (to) setViewId(to)
+    } else if (id === 'present') present(undefined, slideForView(tours[0]?.slides ?? [], viewId ?? 'index'))
+    else if (id === 'copy') void copyText(fqn).then((ok) => showToast(ok ? `Copied ${fqn}` : fqn))
+  }
+  const onNodeMenu = useCallback(
+    (fqn: string, node: any, e: MouseEvent) => {
+      if (!embedded) return // standalone: the browser's own menu
+      e.preventDefault?.()
+      const el = data?.elements?.[fqn]
+      if (!el) return
+      menuFor.current = fqn
+      const items = nodeMenuItems({
+        hasCode: normaliseLinks(el.links).some((l: any) => l.kind === 'code'),
+        paneOn,
+        canDrill: !!(node?.navigateTo ?? scopedViewOf(data, fqn)),
+        canPresent: tours.length > 0,
+      })
+      post({ type: 'protoagent:contextmenu:open', x: e.clientX, y: e.clientY, items })
+    },
+    [data, paneOn, tours.length],
+  )
+
+  // ---- host chords: forward ⌘/Ctrl/Alt keys Atlas didn't handle (⌘⇧K palette etc. keep working)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!shouldForwardKey(e)) return
+      const el = document.activeElement as HTMLElement | null
+      const editable = !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)
+      post({ type: 'protoagent:keydown', combo: keyCombo(e), editable })
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   // ---- keyboard (explore): "/" search, "p" present
   useEffect(() => {
@@ -307,7 +409,7 @@ export function App({ kit }: { kit: Kit }) {
 
   // ---- test hook
   useEffect(() => {
-    ;(window as any).__atlas = { view: viewId, mode: mode.kind, selected, walk, hash: resp?.hash, ok: resp?.ok, stale: resp?.stale, tours: tours.map((t) => [t.id, t.slides.length]), scheme, base: BASE, embedded }
+    ;(window as any).__atlas = { view: viewId, mode: mode.kind, selected, walk, paneOn, hash: resp?.hash, ok: resp?.ok, stale: resp?.stale, tours: tours.map((t) => [t.id, t.slides.length]), scheme, base: BASE, embedded }
   })
 
   // ---------------------------------------------------------------- render
@@ -318,22 +420,22 @@ export function App({ kit }: { kit: Kit }) {
 
   if (!data) {
     let body: JSX.Element
-    if (!resp && !net) body = <div className="state-card muted">Loading the architecture model…</div>
+    if (!resp && !net) body = <div className="pl-empty" data-testid="loading">Loading the architecture model…</div>
     else if (nodeBad || !enginePresent) body = <EngineMissing status={status!} />
     else if (exists === false) body = <EmptyState resp={resp} status={status} />
-    else if (resp && errors.length) body = <BrokenState errors={errors} info={resp} onOpen={(e) => openErrorFile(e)} />
-    else body = <div className="state-card">{net ?? modelError ?? 'No model yet.'}</div>
+    else if (resp && errors.length) body = <BrokenState errors={errors} info={resp} onOpen={openErrorFile} />
+    else body = <div className="pl-empty">{net ?? modelError ?? 'No model yet.'}</div>
     return (
       <div className="app">
-        {net && <div className="banner banner-error">{net}</div>}
+        {net && <div className="pl-banner pl-banner--error banner">{net}</div>}
         <div className="state">{body}</div>
       </div>
     )
   }
 
-  function openErrorFile(e: any) {
+  function openErrorFile(e: any, mods?: { metaKey?: boolean; ctrlKey?: boolean }) {
     const path = errorFileRel(e.file, resp)
-    if (path) void openCode({ kind: 'code', path, line: e.line, title: path }, e.message)
+    if (path) void openCode({ kind: 'code', path, line: e.line, title: path }, e.message, mods)
   }
 
   const v = viewId ? data.views?.[viewId] : null
@@ -354,8 +456,10 @@ export function App({ kit }: { kit: Kit }) {
           start={mode.start}
           cmd={pcmd}
           scheme={scheme}
+          themeCss={themeCss}
           onTour={(id) => setMode({ kind: 'present', tour: id, start: 0, nonce: ++seq.current })}
           onExit={exitPresent}
+          onNoteClick={onCodeRefClick}
         />
       </div>
     )
@@ -375,7 +479,7 @@ export function App({ kit }: { kit: Kit }) {
           ))}
         </nav>
         <span className="sp" />
-        <select className="viewpick" aria-label="View" value={viewId ?? ''} onChange={(e) => setViewId(e.target.value)}>
+        <select className="pl-input pl-select viewpick" aria-label="View" value={viewId ?? ''} onChange={(e) => setViewId(e.target.value)}>
           {viewOptions(data).map((o: any) => (
             <option key={o.id} value={o.id}>
               {' '.repeat(o.depth * 2)}
@@ -387,6 +491,7 @@ export function App({ kit }: { kit: Kit }) {
         <div className="search">
           <input
             ref={searchRef}
+            className="pl-input"
             type="search"
             placeholder="Search  /"
             aria-label="Search elements and views"
@@ -417,52 +522,60 @@ export function App({ kit }: { kit: Kit }) {
             </ul>
           )}
         </div>
-        <button className="pl-btn present-btn" onClick={() => present()} title="Present (P)">
+        <button className="pl-btn pl-btn--sm pl-btn--primary present-btn" onClick={() => present()} title="Present (P)">
           ▶ Present
         </button>
       </header>
       {errors.length > 0 && <ErrorBanner errors={errors} info={resp} stale={!!resp?.stale} open={errorsOpen} setOpen={setErrorsOpen} onOpen={openErrorFile} />}
-      {net && <div className="banner banner-warn">{net}</div>}
+      {net && <div className="pl-banner pl-banner--warning banner">{net}</div>}
       <main className="main">
         <div className="canvas">
           {viewId && v ? (
-            <Explorer model={model!.m} viewId={viewId} scheme={scheme} cmd={ecmd} onNavigate={(to) => (setViewId(to), setSelected(null))} onSelect={setSelected} onWalk={setWalk} />
+            <Explorer model={model!.m} data={data} viewId={viewId} scheme={scheme} themeCss={themeCss} cmd={ecmd} onNavigate={(to) => (setViewId(to), setSelected(null))} onSelect={setSelected} onWalk={setWalk} onNodeMenu={onNodeMenu} />
           ) : (
-            <div className="state-card">This model has no views yet.</div>
+            <div className="pl-empty">This model has no views yet.</div>
           )}
           <div className="canvas-tools">
             {steps > 0 &&
               (walk == null ? (
-                <button className="pl-btn" onClick={() => command({ view: viewId!, step: 'start' })}>
+                <button className="pl-btn pl-btn--sm" onClick={() => command({ view: viewId!, step: 'start' })}>
                   ▶ Walk through {steps} steps
                 </button>
               ) : (
                 <>
-                  <button className="pl-btn" aria-label="Previous step" onClick={() => command({ view: viewId!, step: 'prev' })}>
+                  <button className="pl-btn pl-btn--sm pl-btn--icon" aria-label="Previous step" onClick={() => command({ view: viewId!, step: 'prev' })}>
                     ‹
                   </button>
                   <span className="walkpos">
                     step {walk} / {steps}
                   </span>
-                  <button className="pl-btn" aria-label="Next step" onClick={() => command({ view: viewId!, step: 'next' })}>
+                  <button className="pl-btn pl-btn--sm pl-btn--icon" aria-label="Next step" onClick={() => command({ view: viewId!, step: 'next' })}>
                     ›
                   </button>
-                  <button className="pl-btn" onClick={() => command({ view: viewId!, step: 'stop' })}>
+                  <button className="pl-btn pl-btn--sm" onClick={() => command({ view: viewId!, step: 'stop' })}>
                     Stop
                   </button>
                 </>
               ))}
-            <button className="pl-btn" title="Fit view" aria-label="Fit view" onClick={() => command({ view: viewId!, fit: true })}>
+            <button className="pl-btn pl-btn--sm pl-btn--icon" title="Fit view" aria-label="Fit view" onClick={() => command({ view: viewId!, fit: true })}>
               ⤢
             </button>
           </div>
           {v?.description && !selected && <div className="view-desc">{v.description.txt ?? v.description.md}</div>}
         </div>
         {selected && data.elements?.[selected] && (
-          <Details data={data} fqn={selected} onClose={() => setSelected(null)} onOpenView={(vv, f) => openView(vv, f)} onCode={(l, note) => void openCode(l, note)} />
+          <Details data={data} fqn={selected} paneOn={paneOn} onClose={() => setSelected(null)} onOpenView={(vv, f) => openView(vv, f)} onCode={(l, note, how) => void openCode(l, note, how)} onCodeRefClick={onCodeRefClick} />
         )}
       </main>
-      {toast && <div className="toast">{toast}</div>}
+      {toast && (
+        <div className="pl-toast-stack atlas-toasts">
+          <div className="pl-toast pl-toast--info" role="status">
+            <div className="pl-toast__body">
+              <div className="pl-toast__msg">{toast}</div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 
@@ -480,10 +593,11 @@ export function App({ kit }: { kit: Kit }) {
 }
 
 // ---------------------------------------------------------------- states + banner
-function ErrorBanner({ errors, info, stale, open, setOpen, onOpen, compact }: { errors: any[]; info: any; stale: boolean; open: boolean; setOpen: (b: boolean) => void; onOpen: (e: any) => void; compact?: boolean }) {
+type OpenErr = (e: any, mods?: { metaKey?: boolean; ctrlKey?: boolean }) => void
+function ErrorBanner({ errors, info, stale, open, setOpen, onOpen, compact }: { errors: any[]; info: any; stale: boolean; open: boolean; setOpen: (b: boolean) => void; onOpen: OpenErr; compact?: boolean }) {
   const first = errors[0]
   return (
-    <div className={`banner banner-error${compact ? ' compact' : ''}`} role="alert" data-testid="error-banner">
+    <div className={`pl-banner pl-banner--error banner${compact ? ' compact' : ''}`} role="alert" data-testid="error-banner">
       <div className="b-row">
         <strong>
           {errors.length} model error{errors.length === 1 ? '' : 's'}
@@ -509,7 +623,7 @@ function ErrorBanner({ errors, info, stale, open, setOpen, onOpen, compact }: { 
   )
 }
 
-function ErrorLine({ e, info, onOpen }: { e: any; info: any; onOpen: (e: any) => void }) {
+function ErrorLine({ e, info, onOpen }: { e: any; info: any; onOpen: OpenErr }) {
   if (!e) return null
   const loc = e.file ? `${displayFile(e.file, info)}${e.line ? `:${e.line}` : ''}` : ''
   const can = !!errorFileRel(e.file, info)
@@ -517,7 +631,7 @@ function ErrorLine({ e, info, onOpen }: { e: any; info: any; onOpen: (e: any) =>
     <span className="b-err">
       {loc &&
         (can ? (
-          <button className="b-loc linkish" onClick={() => onOpen(e)} title="Open in the code pane">
+          <button className="b-loc linkish" onClick={(ev) => onOpen(e, ev)} title="View in the code pane (⌘/Ctrl-click: open in editor)">
             {loc}
           </button>
         ) : (
@@ -531,12 +645,12 @@ function ErrorLine({ e, info, onOpen }: { e: any; info: any; onOpen: (e: any) =>
 function EmptyState({ resp, status }: { resp: Resp | null; status: Status | null }) {
   const dir = resp?.model_dir ?? status?.model_dir
   return (
-    <div className="state-card" data-testid="empty-state">
-      <div className="state-icon" aria-hidden>
+    <div className="pl-empty state-card" data-testid="empty-state">
+      <div className="pl-empty__icon state-icon" aria-hidden>
         ◇
       </div>
-      <h1>No architecture map yet</h1>
-      <p>
+      <h1 className="pl-empty__title">No architecture map yet</h1>
+      <p className="pl-empty__desc">
         Ask the agent to <strong>“map this project’s architecture”</strong> — the Atlas skill writes a LikeC4 model of the
         system, with drill-down views and code links, and this page picks it up live.
       </p>
@@ -552,15 +666,15 @@ function EmptyState({ resp, status }: { resp: Resp | null; status: Status | null
 function EngineMissing({ status }: { status: Status }) {
   const n = status?.node ?? {}
   return (
-    <div className="state-card" data-testid="engine-state">
-      <div className="state-icon" aria-hidden>
+    <div className="pl-empty state-card" data-testid="engine-state">
+      <div className="pl-empty__icon state-icon" aria-hidden>
         ⚙
       </div>
-      <h1>Atlas needs Node.js 20+</h1>
+      <h1 className="pl-empty__title">Atlas needs Node.js 20+</h1>
       {status?.engine_present === false ? (
-        <p>The layout engine (vendor/atlas-engine.mjs) is missing from the plugin install — reinstall or update Atlas.</p>
+        <p className="pl-empty__desc">The layout engine (vendor/atlas-engine.mjs) is missing from the plugin install — reinstall or update Atlas.</p>
       ) : (
-        <p>
+        <p className="pl-empty__desc">
           Atlas lays diagrams out with a small Node.js engine and couldn’t find a usable <code>node</code>. Install the
           managed Node runtime from the setup banner, or set <strong>Node.js path</strong> in Atlas’s settings.
         </p>
@@ -574,10 +688,10 @@ function EngineMissing({ status }: { status: Status }) {
   )
 }
 
-function BrokenState({ errors, info, onOpen }: { errors: any[]; info: any; onOpen: (e: any) => void }) {
+function BrokenState({ errors, info, onOpen }: { errors: any[]; info: any; onOpen: OpenErr }) {
   return (
-    <div className="state-card wide" data-testid="broken-state">
-      <h1>The architecture model doesn’t compile yet</h1>
+    <div className="pl-empty state-card wide" data-testid="broken-state">
+      <h1 className="pl-empty__title">The architecture model doesn’t compile yet</h1>
       <p className="muted">Fix these and the diagram appears here automatically.</p>
       <ul className="b-list">
         {errors.slice(0, 40).map((e, i) => (
@@ -588,4 +702,23 @@ function BrokenState({ errors, info, onOpen }: { errors: any[]; info: any; onOpe
       </ul>
     </div>
   )
+}
+
+async function copyText(t: string) {
+  try {
+    await navigator.clipboard.writeText(t)
+    return true
+  } catch {
+    try {
+      const ta = document.createElement('textarea')
+      ta.value = t
+      document.body.appendChild(ta)
+      ta.select()
+      const ok = document.execCommand('copy')
+      ta.remove()
+      return ok
+    } catch {
+      return false
+    }
+  }
 }

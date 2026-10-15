@@ -9,7 +9,9 @@ Rules (each finding is ``{rule, message, view?, element?, tour?}``):
 * ``sequence-nesting`` — a ``variant sequence`` dynamic view using both an element and one of its
   descendants (LikeC4 silently drops those steps);
 * ``tour-*`` — tours naming an unknown view / element, a step out of range, or a malformed file;
-* ``empty-view`` — a view with no nodes.
+* ``empty-view`` — a view with no nodes;
+* ``busy-view`` — a view with more than ``MAX_VIEW_NODES`` nodes (unreadable in the console panel —
+  group the elements into sub-systems with their own scoped views).
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ from pathlib import Path
 
 TOURS_FILE = "atlas.tours.json"
 _STEP_ID = re.compile(r"^step-(\d+)")
+MAX_VIEW_NODES = 12
 
 
 # ── model helpers ───────────────────────────────────────────────────────────────────────────
@@ -211,6 +214,18 @@ def _lint_sequence(model: dict) -> list[dict]:
     return out
 
 
+def _lint_busy(model: dict) -> list[dict]:
+    return [
+        {
+            "rule": "busy-view",
+            "view": vid,
+            "message": f"view {vid} shows {len(v['nodes'])} nodes (max {MAX_VIEW_NODES}) — group elements into sub-systems with their own scoped views",
+        }
+        for vid, v in views(model).items()
+        if len(v.get("nodes") or []) > MAX_VIEW_NODES
+    ]
+
+
 def _lint_empty(model: dict) -> list[dict]:
     return [
         {"rule": "empty-view", "view": vid, "message": f"view {vid} has no nodes — its include rules match nothing"}
@@ -274,4 +289,5 @@ def lint(model: dict | None, tours: dict | None, project_root: Path) -> list[dic
         + _lint_sequence(model)
         + _lint_tours(model, tours)
         + _lint_empty(model)
+        + _lint_busy(model)
     )

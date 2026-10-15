@@ -96,9 +96,11 @@ def test_model_route_returns_the_export(client):
     assert {"index", "proto_agent_detail", "chat_turn_flow"} <= set(views)
     assert d["tours"]["tours"][0]["id"] == "overview"
     # links are normalised: root-relative code links + original url kept
-    link = d["model"]["elements"]["proto_agent.graph"]["links"][0]
+    link = d["model"]["elements"]["proto_agent.core.graph"]["links"][0]
     assert link["kind"] == "code" and link["path"] == "src/graph/agent.py" and link["url"] == "/src/graph/agent.py"
-    node_links = [n for n in views["proto_agent_detail"]["nodes"] if n["id"] == "proto_agent.graph"][0]["links"]
+    node_links = [n for n in views["proto_agent_core_detail"]["nodes"] if n["id"] == "proto_agent.core.graph"][0][
+        "links"
+    ]
     assert node_links[0]["kind"] == "code"
     assert r.headers["etag"] == f'"{d["hash"]}"'
 
@@ -204,6 +206,15 @@ def test_status(client, monkeypatch):
     assert d["node"] == {"path": "/n/node", "version": "v22.0.0", "ok": True, "source": "path"}
     assert d["model_dir"] == str(client.project / "architecture") and d["exists"] is True
     assert d["engine"] == "vendor/atlas-engine.mjs" and d["engine_present"] is True
+    assert d["transition_speed"] == "normal"
+
+
+@pytest.mark.parametrize(
+    ("value", "want"), [("slow", "slow"), ("FAST", "fast"), ("normal", "normal"), ("warp", "normal"), ("", "normal")]
+)
+def test_status_transition_speed(client, value, want):
+    client.registry.config = {"model_dir": "architecture", "transition_speed": value}
+    assert client.get("/api/plugins/atlas/status").json()["transition_speed"] == want
 
 
 @needs_node

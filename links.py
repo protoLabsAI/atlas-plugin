@@ -19,7 +19,8 @@ from __future__ import annotations
 import posixpath
 import re
 from pathlib import Path
-from urllib.parse import unquote
+from urllib.parse import unquote, urlparse
+from urllib.request import url2pathname
 
 _SCHEME = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*:")
 _WEB = re.compile(r"^https?://", re.I)
@@ -57,7 +58,17 @@ def classify(url: str, *, relative: str | None, project_root: Path, model_dir: P
         target = root / raw.lstrip("/")
     else:
         rel = (relative or "").partition("#")[0]
-        target = model_dir / (unquote(rel) if rel else raw)
+        if rel.lower().startswith("file:"):
+            # LikeC4 hands back an absolute file:// URL once a link leaves the model dir
+            # (`link ../../src/a.py` from architecture/) — resolve it, then fence it below.
+            parsed = urlparse(rel)
+            if parsed.netloc not in ("", "localhost"):
+                return {"kind": "invalid", "error": "not a project file"}
+            target = Path(url2pathname(parsed.path))
+        elif _SCHEME.match(rel) or rel.startswith("//"):
+            return {"kind": "invalid", "error": "not a project file"}
+        else:
+            target = model_dir / (unquote(rel) if rel else raw)
     # Normalise lexically (".." collapses) and then follow symlinks — either escaping is refused.
     lexical = Path(posixpath.normpath(target.as_posix()))
     resolved = lexical.resolve()

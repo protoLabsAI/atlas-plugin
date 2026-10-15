@@ -2,15 +2,19 @@
 // drill-down + "appears in". Code links ask the console to open its code pane.
 import { descriptionText, mdLight, normaliseLinks, scopedViewOf, viewList } from './logic.mjs'
 
+type Mods = { metaKey?: boolean; ctrlKey?: boolean }
 type Props = {
   data: any
   fqn: string
+  paneOn: boolean | null
   onClose: () => void
   onOpenView: (view: string, focus?: string) => void
-  onCode: (link: any, note: string) => void
+  /** `how`: a click's modifiers (click = pane, ⌘/Ctrl = editor) or an explicit target */
+  onCode: (link: any, note: string, how: Mods | 'pane' | 'editor') => void
+  onCodeRefClick: (e: React.MouseEvent | React.KeyboardEvent) => void
 }
 
-export function Details({ data, fqn, onClose, onOpenView, onCode }: Props) {
+export function Details({ data, fqn, paneOn, onClose, onOpenView, onCode, onCodeRefClick }: Props) {
   const el = data?.elements?.[fqn]
   if (!el) return null
   const summary = descriptionText(el.summary)
@@ -37,35 +41,57 @@ export function Details({ data, fqn, onClose, onOpenView, onCode }: Props) {
           ) : null}
         </div>
         <h2>{el.title || fqn}</h2>
-        <button className="d-close" aria-label="Close details" onClick={onClose}>
+        <button className="pl-btn pl-btn--ghost pl-btn--icon pl-btn--sm d-close" aria-label="Close details" onClick={onClose}>
           ×
         </button>
       </header>
-      {el.technology && <div className="d-tech">{el.technology}</div>}
-      {summary && summary !== desc && <div className="d-summary" dangerouslySetInnerHTML={{ __html: mdLight(summary) }} />}
-      {desc && <div className="d-desc" dangerouslySetInnerHTML={{ __html: mdLight(desc) }} />}
+      {el.technology && <span className="pl-badge d-tech">{el.technology}</span>}
+      {summary && summary !== desc && <div className="d-summary" onClick={onCodeRefClick} onKeyDown={onCodeRefClick} dangerouslySetInnerHTML={{ __html: mdLight(summary, { codeRefs: true }) }} />}
+      {desc && <div className="d-desc" onClick={onCodeRefClick} onKeyDown={onCodeRefClick} dangerouslySetInnerHTML={{ __html: mdLight(desc, { codeRefs: true }) }} />}
       {drill && (
-        <button className="pl-btn d-drill" onClick={() => onOpenView(drill)}>
+        <button className="pl-btn pl-btn--sm d-drill" onClick={() => onOpenView(drill)}>
           Open drill-down ›
         </button>
       )}
       {links.length > 0 && (
         <section>
           <h3>Links</h3>
+          {paneOn === false && links.some((l: any) => l.kind === 'code') && (
+            <p className="d-hint" data-testid="pane-hint">
+              Turn on the code pane in <strong>Tools ▸ Filesystem</strong> to view code here.
+            </p>
+          )}
           <ul className="d-links">
             {links.map((l: any, i: number) => (
               <li key={i}>
                 {l.kind === 'code' ? (
-                  <button className="d-code" data-testid="code-link" onClick={() => onCode(l, el.title || fqn)} title={`Open ${l.path}${l.line ? `:${l.line}` : ''} in the code pane`}>
-                    <span className="d-ico" aria-hidden>
-                      ⌥
+                  <div className="d-code-row">
+                    <button
+                      className="d-code"
+                      data-testid="code-link"
+                      onClick={(e) => onCode(l, el.title || fqn, e)}
+                      title={paneOn === false ? `Open ${l.path} in your editor` : `View ${l.path} in the code pane (⌘/Ctrl-click: open in editor)`}
+                    >
+                      <span className="d-ico" aria-hidden>
+                        ⌥
+                      </span>
+                      <span className="d-ltitle">{l.title}</span>
+                      <code>
+                        {l.path}
+                        {l.line ? `:${l.line}${l.endLine ? `–${l.endLine}` : ''}` : ''}
+                      </code>
+                    </button>
+                    <span className="d-code-actions">
+                      {paneOn !== false && (
+                        <button className="pl-btn pl-btn--xs pl-btn--primary" data-testid="code-view" onClick={() => onCode(l, el.title || fqn, 'pane')}>
+                          View
+                        </button>
+                      )}
+                      <button className={`pl-btn pl-btn--xs${paneOn === false ? ' pl-btn--primary' : ''}`} data-testid="code-editor" onClick={() => onCode(l, el.title || fqn, 'editor')}>
+                        Open in editor
+                      </button>
                     </span>
-                    <span className="d-ltitle">{l.title}</span>
-                    <code>
-                      {l.path}
-                      {l.line ? `:${l.line}${l.endLine ? `–${l.endLine}` : ''}` : ''}
-                    </code>
-                  </button>
+                  </div>
                 ) : l.kind === 'web' ? (
                   <a className="d-web" href={l.url} target="_blank" rel="noopener noreferrer">
                     <span className="d-ico" aria-hidden>
@@ -101,7 +127,7 @@ export function Details({ data, fqn, onClose, onOpenView, onCode }: Props) {
           <h3>Tags</h3>
           <div className="d-tags">
             {el.tags.map((t: string) => (
-              <span key={t} className="tag">
+              <span key={t} className="pl-tag">
                 #{t}
               </span>
             ))}

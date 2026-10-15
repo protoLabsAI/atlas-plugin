@@ -15459,6 +15459,9 @@ var require_lib2 = __commonJS({
   }
 });
 
+// engine.mjs
+import { statSync as statSync3 } from "node:fs";
+
 // node_modules/@likec4/language-services/dist/_virtual/_rolldown/runtime.mjs
 var e = Object.defineProperty;
 var __name = (t50, n47) => e(t50, `name`, { value: n47, configurable: true });
@@ -110348,6 +110351,15 @@ async function fromWorkspace(e36, r30) {
 // engine.mjs
 var [cmd, dir] = process.argv.slice(2);
 var t0 = performance.now();
+var isDir = false;
+try {
+  isDir = statSync3(dir).isDirectory();
+} catch {
+}
+if (!isDir) {
+  process.stdout.write(JSON.stringify({ ok: false, errors: [{ message: `model directory not found: ${dir}`, file: dir, line: 1 }], ms: 0 }));
+  process.exit(0);
+}
 var likec4 = await fromWorkspace(dir, { printErrors: false, throwIfInvalid: false, graphviz: "wasm", watch: false });
 var errors2 = likec4.getErrors().map((e36) => ({ message: e36.message, file: e36.sourceFsPath, line: e36.range?.start?.line + 1 }));
 var out = { ok: errors2.length === 0, errors: errors2, ms: 0 };

@@ -1,7 +1,7 @@
 name: CI
 
 # Lint + test on the org's Namespace Linux profile (override NSC_RUNNER on a fork that
-# lacks it). The suite is host-free (only requirements-dev.txt); Node runs the REAL vendored
+# lacks it; fork PRs always run on ubuntu-latest). The suite is host-free (only requirements-dev.txt); Node runs the REAL vendored
 # layout engine against examples/protoagent.
 on:
   pull_request:
@@ -11,7 +11,9 @@ on:
 
 jobs:
   test:
-    runs-on: ${{ vars.NSC_RUNNER || 'namespace-profile-protolabs-linux' }}
+    # A PR from a FORK runs untrusted code — it gets a GitHub-hosted runner, never the org's
+    # Namespace profile. Same-repo PRs, pushes and dispatches use the profile.
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || (vars.NSC_RUNNER || 'namespace-profile-protolabs-linux') }}
     timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4

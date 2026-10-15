@@ -25,7 +25,7 @@ Put the model's `.c4` files in `<project>/architecture/` (the `model_dir` settin
 `likec4.config.json` (`{"name": "<project>"}`). Optionally add an `atlas.tours.json` file of
 presenter tours. If you don't, the viewer derives an auto-tour.
 [`examples/protoagent/`](examples/protoagent) is a working model of protoAgent itself, with a
-7-slide overview tour.
+8-slide overview tour.
 
 - **Drill-down:** `view x of elem` is `elem`'s drill-down view.
 - **Walkthroughs:** a `dynamic view` is a step-by-step walkthrough.
@@ -72,9 +72,24 @@ The suite needs no protoAgent host. The engine tests run the real vendored engin
 
 The viewer (`web/` → `static/`) and the engine (`web/engine.mjs` → `vendor/`) are built with
 `npm run build` in `web/`. Both outputs are committed, so installing from git needs no build.
+`npm run build` also regenerates `THIRD_PARTY_NOTICES.md` (`npm run notices`), from the modules both bundles
+actually contain.
+
+**Viewer dev loop (`web/dev/`).** `node web/dev/server.mjs` stands in for the protoAgent host and the Atlas
+backend. It serves the built viewer, a DS-kit stub, `/model` (exported from `--model`, default `examples/protoagent`)
+and a console-like harness page. Use `--project-root <dir>` (or `$ATLAS_PROJECT_ROOT`) for code links, and
+`--real-kit` with `$PROTOAGENT_DIR` to serve a real console's `_ds` kit. `node web/dev/drive.mjs` screenshots the
+viewer through that server with Playwright. Set `$PLAYWRIGHT_FROM` to a folder whose `node_modules` has Playwright;
+shots go to `--out`, or a temp dir by default.
 
 ## Release
 
 Bump `version` in `protoagent.plugin.yaml` **and** `pyproject.toml` (a test keeps them in
 lockstep). Then merge a `chore: release vX.Y.Z` commit to `main`. `release.yml` tags it and
 publishes the release.
+
+## License
+
+[MIT](LICENSE) © 2026 protoLabs. The prebuilt engine and viewer bundles include third-party code under its own
+licenses (MIT, Apache-2.0, BSD-3-Clause, 0BSD, ISC, BlueOak-1.0.0, and EPL-2.0 for the Graphviz inside the layout engine). The full texts,
+plus where to get the exact Graphviz source, are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

@@ -1,19 +1,20 @@
 // Drives the built viewer through the dev server (dev/server.mjs) with Playwright and writes
 // screenshots. Playwright isn't a dependency of this package: it's resolved from
-// $PLAYWRIGHT_FROM (a dir with node_modules/playwright), default the atlas spike.
+// $PLAYWRIGHT_FROM (a dir with node_modules/playwright; required).
 //   node dev/drive.mjs [--port 4720] [--out <dir>] [--model <dir to mutate for the error test>]
 import { createRequire } from 'node:module'
 import { readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { homedir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : d }
 const PORT = arg('--port', '4720')
-const OUT = arg('--out', '/Users/kj/dev/atlas-spike/viewer-shots')
+const OUT = arg('--out', join(tmpdir(), 'atlas-viewer-shots'))
 const MODEL = arg('--model', '')
 const HOST = `http://localhost:${PORT}`
 mkdirSync(OUT, { recursive: true })
-const req = createRequire(join(process.env.PLAYWRIGHT_FROM ?? '/Users/kj/dev/atlas-spike/embed', 'package.json'))
+if (!process.env.PLAYWRIGHT_FROM) { console.error('set PLAYWRIGHT_FROM to a dir whose node_modules has playwright'); process.exit(2) }
+const req = createRequire(join(process.env.PLAYWRIGHT_FROM, 'package.json'))
 const { chromium } = req('playwright')
 const cache = join(homedir(), 'Library/Caches/ms-playwright')
 const shell = readdirSync(cache).filter((d) => d.startsWith('chromium_headless_shell')).sort().pop()
@@ -57,12 +58,12 @@ await mock('scenario=normal&token=dev-token&tours=1')
   const btns = node.locator('button, [role=button]')
   for (let i = 0; i < (await btns.count()); i++) {
     await btns.nth(i).click({ force: true }).catch(() => {})
-    await wait(900)
+    await wait(400)
     if ((await state(frame)).view !== 'index') break
   }
   const s1 = await state(frame)
   check('drill-down via node navigate button', s1.view === 'proto_agent_detail', s1.view)
-  await wait(600)
+  await wait(2000)
   await shot(page, '02-drilldown-containers')
 
   // details panel
@@ -76,7 +77,22 @@ await mock('scenario=normal&token=dev-token&tours=1')
   await frame.locator('[data-testid=code-link]').first().click()
   await wait(500)
   const msgs = await page.evaluate(() => window.__msgs.filter((m) => m.type === 'protoagent:code:open'))
-  check('code link posts protoagent:code:open', msgs.length === 1 && msgs[0].project === 'protoAgent' && msgs[0].path === 'src/server/__init__.py', JSON.stringify(msgs[0]))
+  check('code link click → code pane (open_in: pane)', msgs.length === 1 && msgs[0].project === 'protoAgent' && msgs[0].path === 'src/server/__init__.py' && msgs[0].open_in === 'pane', JSON.stringify(msgs[0]))
+  await frame.locator('[data-testid=code-link]').first().click({ modifiers: ['Meta'] })
+  await frame.locator('[data-testid=code-editor]').first().click()
+  await wait(300)
+  const ed = await page.evaluate(() => window.__msgs.filter((m) => m.type === 'protoagent:code:open').slice(1).map((m) => m.open_in))
+  check('⌘-click and "Open in editor" → open_in: editor', ed.join() === 'editor,editor', ed.join())
+  // a node's context menu goes to the console, its action comes back
+  await frame.locator('.react-flow__node', { hasText: /^Agent graph/ }).first().click({ button: 'right', position: { x: 30, y: 20 } })
+  await wait(300)
+  const menu = await page.evaluate(() => window.__menu)
+  check('right-click → protoagent:contextmenu:open', !!menu && menu.items.some((i) => i.id === 'view') && menu.items.some((i) => i.id === 'drill'), (menu?.items ?? []).map((i) => i.id ?? '-').join(','))
+  await page.evaluate(() => window.menuAction('details')); await wait(300)
+  check('contextmenu:action details opens the panel', (await state(frame)).selected === 'proto_agent.graph')
+  await page.keyboard.press('Meta+Shift+K'); await wait(200)
+  const kd = await page.evaluate(() => window.__msgs.filter((m) => m.type === 'protoagent:keydown').map((m) => m.combo))
+  check('host chords forwarded (protoagent:keydown)', kd.includes('mod+shift+k'), kd.join())
   const subs = await page.evaluate(() => window.__msgs.filter((m) => m.type === 'protoagent:subscribe'))
   check('subscribes to atlas.# on the bus', subs.some((m) => m.patterns?.includes('atlas.#')))
 
@@ -85,14 +101,14 @@ await mock('scenario=normal&token=dev-token&tours=1')
   await wait(300)
   await shot(page, '04-search')
   await frame.locator('.hits button').first().click()
-  await wait(1500)
+  await wait(2500)
   const s2 = await state(frame)
   check('search result navigates + selects', s2.selected === 'gateway', `${s2.view} ${s2.selected}`)
   await shot(page, '05-search-picked')
 
   // breadcrumb back to the root
   await frame.locator('.crumb button').first().click()
-  await wait(900)
+  await wait(2200)
   check('breadcrumb navigates up', (await state(frame)).view === 'index')
 
   // live theme switch → light
@@ -104,17 +120,35 @@ await mock('scenario=normal&token=dev-token&tours=1')
 
   // dynamic view walkthrough (explore)
   await frame.locator('.viewpick').selectOption('chat_turn_flow')
-  await wait(1200)
+  await wait(2200)
   await frame.getByRole('button', { name: /Walk through/ }).click()
-  await wait(900)
+  await wait(1400)
   await frame.getByRole('button', { name: 'Next step' }).click()
-  await wait(900)
+  await wait(1400)
   const s3 = await state(frame)
   check('explore walkthrough steps', s3.walk === 2, 'walk=' + s3.walk)
   await shot(page, '07-dynamic-walkthrough-light')
   console.log(logs.join('\n'))
   await page.close()
 }
+
+// ---------------------------------------------------------------- code pane OFF → hint + editor primary
+await mock('pane=0')
+{
+  const { page, frame } = await open('dark')
+  await waitFor(frame, () => window.__atlas?.view === 'index' && window.__atlas?.paneOn === false)
+  await wait(1200)
+  await frame.locator('.search input').fill('agent graph'); await wait(200)
+  await frame.locator('.hits button').first().click(); await wait(2600)
+  const hint = await frame.locator('[data-testid=pane-hint]').count()
+  const view = await frame.locator('[data-testid=code-view]').count()
+  await frame.locator('[data-testid=code-link]').first().click(); await wait(300)
+  const m = await page.evaluate(() => window.__msgs.filter((x) => x.type === 'protoagent:code:open').pop())
+  check('pane off: hint, no View button, click → editor', hint === 1 && view === 0 && m?.open_in === 'editor', JSON.stringify(m))
+  await shot(page, '08-pane-off-hint')
+  await page.close()
+}
+await mock('pane=1')
 
 // ---------------------------------------------------------------- presenter (dark, slowed to catch frames)
 {
@@ -126,11 +160,11 @@ await mock('scenario=normal&token=dev-token&tours=1')
   await wait(800)
   check('presenter opens on the API tour', (await state(frame)).mode === 'present')
   await shot(page, '10-present-slide1')
-  await page.keyboard.press('ArrowRight'); await wait(900)
+  await page.keyboard.press('ArrowRight'); await wait(1600)
   await shot(page, '11-present-slide2-focus')
   // slide 3 = drill into proto_agent_detail: capture the zoom mid-flight
   await page.keyboard.press('ArrowRight')
-  for (const [i, ms] of [[0, 450], [1, 500], [2, 500]]) { await wait(ms); await shot(page, `12-present-zoom-in-f${i}`) }
+  for (const [i, ms] of [[0, 900], [1, 900], [2, 900]]) { await wait(ms); await shot(page, `12-present-zoom-in-f${i}`) }
   await waitFor(frame, () => !window.__present.busy)
   await wait(400)
   const p3 = await frame.evaluate(() => ({ view: window.__present.view, slide: window.__present.slide }))
@@ -146,7 +180,7 @@ await mock('scenario=normal&token=dev-token&tours=1')
   await page.keyboard.press('n')
   // bus: atlas.show → explore a view with focus
   await page.evaluate(() => window.emit('atlas.show', { view: 'proto_agent_detail', focus: 'proto_agent.graph' }))
-  await wait(1800)
+  await wait(3500)
   const s4 = await state(frame)
   check('atlas.show (explore + focus) from the bus', s4.mode === 'explore' && s4.view === 'proto_agent_detail' && s4.selected === 'proto_agent.graph', JSON.stringify(s4))
   await shot(page, '15-bus-show-focus')
@@ -157,7 +191,7 @@ await mock('scenario=normal&token=dev-token&tours=1')
   check('atlas.show (tour + slide, present) from the bus', (await frame.evaluate(() => window.__present?.slide)) === 3)
   await shot(page, '16-bus-show-present')
   // Esc twice (unfocus, then up), up to the top, then exit
-  for (let i = 0; i < 5 && (await state(frame)).mode === 'present'; i++) { await page.keyboard.press('Escape'); await wait(2000) }
+  for (let i = 0; i < 6 && (await state(frame)).mode === 'present'; i++) { await page.keyboard.press('Escape'); await wait(3500) }
   check('Esc at the top level exits the presenter', (await state(frame)).mode === 'explore')
   console.log(logs.join('\n'))
   await page.close()
@@ -176,7 +210,7 @@ await mock('tours=0')
   await frame.locator('.present-btn').click(); await wait(900)
   await page.keyboard.press('ArrowRight'); await wait(250)
   await shot(page, '17-present-auto-reduced-motion-light')
-  await page.keyboard.press('End'); await wait(1500)
+  await page.keyboard.press('End'); await wait(2500)
   await page.keyboard.press('ArrowRight'); await wait(1200)
   check('→ walks a whole-dynamic-view slide', (await frame.evaluate(() => window.__present.walk)) === 1)
   await shot(page, '18-present-auto-dynamic-walk-light')
@@ -189,7 +223,7 @@ if (MODEL) {
   const orig = readFileSync(f, 'utf8')
   const { page, frame } = await open('dark')
   await waitFor(frame, () => window.__atlas?.view === 'index')
-  await frame.locator('.viewpick').selectOption('proto_agent_detail'); await wait(800)
+  await frame.locator('.viewpick').selectOption('proto_agent_detail'); await wait(2500)
   writeFileSync(f, orig.replace(/}\s*$/, '  broken_thing = component \'oops\' {\n    -> nowhere_at_all\n  }\n}\n'))
   const banner = await waitFor(frame, () => !!document.querySelector('[data-testid=error-banner]'), null, 10000)
   await wait(400)

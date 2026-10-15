@@ -16,116 +16,128 @@ model {
   proto_agent = system 'protoAgent' 'LangGraph agent runtime' {
     link /README.md 'README'
 
-    console = container 'Console' 'React operator console' 'TypeScript, React' {
-      link /apps/web/src/main.tsx 'Entry'
+    // Grouped into three subsystems so no view shows more than ~12 nodes.
+    interfaces = subsystem 'Interfaces' 'Everything a person or another agent talks to' {
+      console = container 'Console' 'React operator console' 'TypeScript, React' {
+        link /apps/web/src/main.tsx 'Entry'
+      }
+      server = container 'Server' 'FastAPI app: A2A, /v1, chat, wiring' 'FastAPI' {
+        link /src/server/__init__.py 'App bootstrap'
+        link /src/server/__main__.py 'Entrypoint'
+        chat = component 'Chat turn driver' 'Runs a turn against the graph' {
+          link /src/server/chat.py 'Source'
+        }
+        a2a_routes = component 'A2A routes' 'JSON-RPC /a2a surface and inbox delivery' {
+          link /src/server/a2a.py 'Source'
+        }
+        turn_stream = component 'Turn streaming' 'Streams turn events to clients' {
+          link /src/server/turn_stream.py 'Source'
+        }
+        agent_init = component 'Agent init' 'Builds graph, stores and plugins at boot' {
+          link /src/server/agent_init.py 'Source'
+        }
+        plugin_wiring = component 'Plugin wiring' 'Mounts plugin routes and surfaces' {
+          link /src/server/plugin_wiring.py 'Source'
+        }
+        goal_loop = component 'Goal loop' 'Continues goals across turns' {
+          link /src/server/goal_loop.py 'Source'
+        }
+      }
+      operator_api = container 'Operator API' 'REST surface under /api' 'FastAPI routers' {
+        link /src/operator_api/routes.py 'Routes'
+      }
+      a2a_impl = container 'A2A impl' 'A2A executor, auth, wire format' 'a2a-sdk' {
+        link /src/a2a_impl/executor.py 'Executor'
+      }
     }
-    server = container 'Server' 'FastAPI app: A2A, /v1, chat, wiring' 'FastAPI' {
-      link /src/server/__init__.py 'App bootstrap'
-      link /src/server/__main__.py 'Entrypoint'
-      chat = component 'Chat turn driver' 'Runs a turn against the graph' {
-        link /src/server/chat.py 'Source'
-      }
-      a2a_routes = component 'A2A routes' 'JSON-RPC /a2a surface and inbox delivery' {
-        link /src/server/a2a.py 'Source'
-      }
-      turn_stream = component 'Turn streaming' 'Streams turn events to clients' {
-        link /src/server/turn_stream.py 'Source'
-      }
-      agent_init = component 'Agent init' 'Builds graph, stores and plugins at boot' {
-        link /src/server/agent_init.py 'Source'
-      }
-      plugin_wiring = component 'Plugin wiring' 'Mounts plugin routes and surfaces' {
-        link /src/server/plugin_wiring.py 'Source'
-      }
-      goal_loop = component 'Goal loop' 'Continues goals across turns' {
-        link /src/server/goal_loop.py 'Source'
-      }
-    }
-    operator_api = container 'Operator API' 'REST surface under /api' 'FastAPI routers' {
-      link /src/operator_api/routes.py 'Routes'
-    }
-    graph = container 'Agent graph' 'Tool loop, subagents, middleware' 'LangGraph' {
-      link /src/graph/agent.py 'Source'
-      agent_core = component 'Agent core' 'create_agent tool loop' {
+
+    core = subsystem 'Agent core' 'The LangGraph agent and what it calls' {
+      graph = container 'Agent graph' 'Tool loop, subagents, middleware' 'LangGraph' {
         link /src/graph/agent.py 'Source'
+        agent_core = component 'Agent core' 'create_agent tool loop' {
+          link /src/graph/agent.py 'Source'
+        }
+        llm_client = component 'LLM client' 'Streaming model client to the gateway' {
+          link /src/graph/llm.py 'Source'
+        }
+        middleware = component 'Middleware' 'Compaction, memory, knowledge, guards' {
+          link /src/graph/middleware/compaction.py 'Compaction'
+        }
+        subagents = component 'Subagents' 'task() delegation' {
+          link /src/graph/subagents/config.py 'Source'
+        }
+        checkpointer = component 'Checkpointer' 'Per-session graph state' {
+          link /src/graph/checkpointer.py 'Source'
+        }
+        plugin_host = component 'Plugin host' 'Discovers and loads plugins' {
+          link /src/graph/plugins/loader.py 'Loader'
+        }
+        config = component 'Config' 'Typed config load and roundtrip' {
+          link /src/graph/config.py 'Source'
+        }
       }
-      llm_client = component 'LLM client' 'Streaming model client to the gateway' {
-        link /src/graph/llm.py 'Source'
+      tools = container 'Tools' 'Built-in tools: fs, shell, MCP, memory' 'Python' {
+        link /src/tools/lg_tools.py 'Source'
       }
-      middleware = component 'Middleware' 'Compaction, memory, knowledge, guards' {
-        link /src/graph/middleware/compaction.py 'Compaction'
-      }
-      subagents = component 'Subagents' 'task() delegation' {
-        link /src/graph/subagents/config.py 'Source'
-      }
-      checkpointer = component 'Checkpointer' 'Per-session graph state' {
-        link /src/graph/checkpointer.py 'Source'
-      }
-      plugin_host = component 'Plugin host' 'Discovers and loads plugins' {
-        link /src/graph/plugins/loader.py 'Loader'
-      }
-      config = component 'Config' 'Typed config load and roundtrip' {
-        link /src/graph/config.py 'Source'
+      knowledge = container 'Knowledge store' 'Hybrid search over ingested docs' 'Python' {
+        link /src/knowledge/store.py 'Source'
       }
     }
-    a2a_impl = container 'A2A impl' 'A2A executor, auth, wire format' 'a2a-sdk' {
-      link /src/a2a_impl/executor.py 'Executor'
-    }
-    tools = container 'Tools' 'Built-in tools: fs, shell, MCP, memory' 'Python' {
-      link /src/tools/lg_tools.py 'Source'
-    }
-    knowledge = container 'Knowledge store' 'Hybrid search over ingested docs' 'Python' {
-      link /src/knowledge/store.py 'Source'
-    }
-    scheduler = container 'Scheduler' 'Local cron-style job runner' 'Python, SQLite' {
-      link /src/scheduler/local.py 'Source'
-    }
-    plugins_runtime = container 'Plugins runtime' 'Plugin loader, installer, trust' 'Python' {
-      link /src/graph/plugins/host.py 'Host'
-    }
-    events = container 'Event bus' 'In-process events' 'Python' {
-      link /src/events/bus.py 'Source'
-    }
-    observability = container 'Observability' 'Tracing, metrics, audit' 'Python' {
-      link /src/observability/tracing.py 'Tracing'
-    }
-    state = database 'State stores' 'Checkpoints, tasks, jobs' 'SQLite'
 
-    console -> server 'chat over HTTP/SSE'
-    console -> operator_api 'REST /api'
-    server -> graph 'submits message'
-    server -> a2a_impl 'serves A2A'
-    server -> operator_api 'mounts'
-    server -> plugins_runtime 'wires plugin routes'
-    operator_api -> graph 'config and state'
-    operator_api -> knowledge 'browse and ingest'
-    a2a_impl -> graph 'executes tasks'
-    graph -> tools 'tool calls'
-    graph -> knowledge 'retrieval'
-    graph -> state 'checkpoints'
-    graph -> observability 'traces'
-    scheduler -> a2a_impl 'fires jobs as turns'
-    plugins_runtime -> tools 'registers tools'
-    graph -> events 'publishes'
-    scheduler -> state 'jobs'
-
-    server.chat -> graph.agent_core 'astream'
-    server.a2a_routes -> a2a_impl 'delegates'
-    server.agent_init -> graph.agent_core 'builds'
-    server.agent_init -> graph.plugin_host 'loads plugins'
-    server.plugin_wiring -> graph.plugin_host 'mounts routes'
-    server.goal_loop -> server.chat 'continues'
-    server.chat -> server.turn_stream 'emits events'
-    graph.agent_core -> graph.llm_client 'model call'
-    graph.agent_core -> graph.middleware 'wraps'
-    graph.agent_core -> graph.subagents 'task()'
-    graph.agent_core -> graph.checkpointer 'persist'
-    graph.agent_core -> graph.config 'reads'
+    platform = subsystem 'Platform services' 'Scheduling, plugins, events, telemetry, state' {
+      scheduler = container 'Scheduler' 'Local cron-style job runner' 'Python, SQLite' {
+        link /src/scheduler/local.py 'Source'
+      }
+      plugins_runtime = container 'Plugins runtime' 'Plugin loader, installer, trust' 'Python' {
+        link /src/graph/plugins/host.py 'Host'
+      }
+      events = container 'Event bus' 'In-process events' 'Python' {
+        link /src/events/bus.py 'Source'
+      }
+      observability = container 'Observability' 'Tracing, metrics, audit' 'Python' {
+        link /src/observability/tracing.py 'Tracing'
+      }
+      state = database 'State stores' 'Checkpoints, tasks, jobs' 'SQLite'
+    }
   }
 
-  operator -> console 'chats and configures'
-  peers -> proto_agent.server 'A2A and /v1' 
-  proto_agent.graph -> gateway 'completions'
-  proto_agent.tools -> mcp 'MCP calls'
-  proto_agent.plugins_runtime -> plugin_repos 'git install'
+  // Container relationships (FQNs from the root, so nesting can change without breaking them)
+  proto_agent.interfaces.console -> proto_agent.interfaces.server 'chat over HTTP/SSE'
+  proto_agent.interfaces.console -> proto_agent.interfaces.operator_api 'REST /api'
+  proto_agent.interfaces.server -> proto_agent.core.graph 'submits message'
+  proto_agent.interfaces.server -> proto_agent.interfaces.a2a_impl 'serves A2A'
+  proto_agent.interfaces.server -> proto_agent.interfaces.operator_api 'mounts'
+  proto_agent.interfaces.server -> proto_agent.platform.plugins_runtime 'wires plugin routes'
+  proto_agent.interfaces.operator_api -> proto_agent.core.graph 'config and state'
+  proto_agent.interfaces.operator_api -> proto_agent.core.knowledge 'browse and ingest'
+  proto_agent.interfaces.a2a_impl -> proto_agent.core.graph 'executes tasks'
+  proto_agent.core.graph -> proto_agent.core.tools 'tool calls'
+  proto_agent.core.graph -> proto_agent.core.knowledge 'retrieval'
+  proto_agent.core.graph -> proto_agent.platform.state 'checkpoints'
+  proto_agent.core.graph -> proto_agent.platform.observability 'traces'
+  proto_agent.core.graph -> proto_agent.platform.events 'publishes'
+  proto_agent.platform.scheduler -> proto_agent.interfaces.a2a_impl 'fires jobs as turns'
+  proto_agent.platform.scheduler -> proto_agent.platform.state 'jobs'
+  proto_agent.platform.plugins_runtime -> proto_agent.core.tools 'registers tools'
+
+  // Component relationships
+  proto_agent.interfaces.server.chat -> proto_agent.core.graph.agent_core 'astream'
+  proto_agent.interfaces.server.a2a_routes -> proto_agent.interfaces.a2a_impl 'delegates'
+  proto_agent.interfaces.server.agent_init -> proto_agent.core.graph.agent_core 'builds'
+  proto_agent.interfaces.server.agent_init -> proto_agent.core.graph.plugin_host 'loads plugins'
+  proto_agent.interfaces.server.plugin_wiring -> proto_agent.core.graph.plugin_host 'mounts routes'
+  proto_agent.interfaces.server.goal_loop -> proto_agent.interfaces.server.chat 'continues'
+  proto_agent.interfaces.server.chat -> proto_agent.interfaces.server.turn_stream 'emits events'
+  proto_agent.core.graph.agent_core -> proto_agent.core.graph.llm_client 'model call'
+  proto_agent.core.graph.agent_core -> proto_agent.core.graph.middleware 'wraps'
+  proto_agent.core.graph.agent_core -> proto_agent.core.graph.subagents 'task()'
+  proto_agent.core.graph.agent_core -> proto_agent.core.graph.checkpointer 'persist'
+  proto_agent.core.graph.agent_core -> proto_agent.core.graph.config 'reads'
+
+  // The outside world
+  operator -> proto_agent.interfaces.console 'chats and configures'
+  peers -> proto_agent.interfaces.server 'A2A and /v1'
+  proto_agent.core.graph.llm_client -> gateway 'completions'
+  proto_agent.core.tools -> mcp 'MCP calls'
+  proto_agent.platform.plugins_runtime -> plugin_repos 'git install'
 }

@@ -156,3 +156,11 @@ def test_read_tours(tmp_path):
     assert L.read_tours(tmp_path)[1][0]["message"].endswith('expected {"tours": [...]}')
     (tmp_path / L.TOURS_FILE).write_text(json.dumps({"tours": [{"id": "x", "slides": [{"view": "index"}]}]}))
     assert L.read_tours(tmp_path)[0]["tours"][0]["id"] == "x"
+
+
+def test_busy_view(base, tmp_path):
+    base["views"]["ab_detail"] = _view("ab_detail", nodes=("a.b.c",), viewOf="a.b")
+    base["views"]["crowded"] = _view("crowded", nodes=tuple(f"n{i}" for i in range(L.MAX_VIEW_NODES + 1)))
+    base["views"]["full"] = _view("full", nodes=tuple(f"n{i}" for i in range(L.MAX_VIEW_NODES)))
+    f = L.lint(base, None, tmp_path)
+    assert rules(f) == ["busy-view"] and f[0]["view"] == "crowded"

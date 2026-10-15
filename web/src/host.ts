@@ -1,6 +1,6 @@
 // Host integration: the DS plugin kit (handshake, bearer, theme), the bus bridge, and
 // messages to the console (code pane). See protoAgent docs/reference/plugin-view-bridge.md.
-import { schemeForRgb } from './logic.mjs'
+import { parentOriginOf, schemeForRgb } from './logic.mjs'
 
 export type Kit = {
   initPluginView: (cb?: (x: { token: string | null; theme: any }) => void) => any
@@ -33,10 +33,23 @@ export async function loadKit(): Promise<Kit> {
   }
 }
 
+/** The console frame's origin — never "*": under the desktop app the console is
+ *  tauri://localhost while this page is http://127.0.0.1, so it can't be assumed equal. */
+export const PARENT_ORIGIN: string = parentOriginOf({
+  ancestorOrigins: (location as any).ancestorOrigins ? Array.from((location as any).ancestorOrigins as ArrayLike<string>) : [],
+  referrer: document.referrer,
+  origin: location.origin,
+})
+
+/** A message really from the console: our parent window, at its origin. */
+export function fromParent(e: MessageEvent) {
+  return embedded && e.source === window.parent && (e.origin === PARENT_ORIGIN || e.origin === location.origin)
+}
+
 export function post(msg: Record<string, unknown>) {
   if (!embedded) return false
   try {
-    window.parent.postMessage(msg, '*')
+    window.parent.postMessage(msg, PARENT_ORIGIN)
     return true
   } catch {
     return false

@@ -224,9 +224,10 @@ export function resolveProject(info, roots, path) {
 const trimSlash = (s) => (typeof s === 'string' ? s.trim().replace(/\/+$/, '') : '')
 
 /** The `protoagent:code:open` message for a normalised code link, or null. */
-export function codeOpenMessage(target, link, note) {
+export function codeOpenMessage(target, link, note, openIn) {
   if (!target || !link || link.kind !== 'code') return null
   const msg = { type: 'protoagent:code:open', project: target.project, path: target.path }
+  if (openIn === 'pane' || openIn === 'editor') msg.open_in = openIn
   if (link.line) msg.line = link.line
   if (link.line && link.endLine) msg.end_line = link.endLine
   if (note) msg.note = String(note).slice(0, 280)
@@ -430,8 +431,23 @@ export function parseShow(d, data, tours) {
 const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }
 export const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ESC[c])
 
-/** Markdown-light → safe HTML: **bold**, *em*, `code`, [text](https://…), paragraphs + breaks. */
-export function mdLight(src) {
+/**
+ * A code span that names a project file — `src/x.py`, `src/x.py:12`, `src/x.py:12-20`,
+ * `src/x.py#L12` — as a code link, else null. (Already HTML-escaped text; must look like
+ * a relative path with an extension.)
+ */
+export function parseCodeRef(text) {
+  const m = /^((?:[\w.@+-]+\/)*[\w.@+-]+\.[A-Za-z0-9]{1,8})(?:(?::|#L)(\d+)(?:-L?(\d+))?)?$/.exec(String(text ?? '').trim())
+  if (!m) return null
+  const path = safeRelPath(m[1])
+  if (!path || /^\d+(\.\d+)+$/.test(path)) return null // a version number, not a file
+  const line = m[2] ? Number(m[2]) : undefined
+  const end = m[3] ? Number(m[3]) : undefined
+  return { kind: 'code', title: path, url: text, path, line, endLine: line && end && end >= line ? end : undefined }
+}
+
+/** Markdown-light → safe HTML (`opts.codeRefs`: file-path code spans become code links): **bold**, *em*, `code`, [text](https://…), paragraphs + breaks. */
+export function mdLight(src, opts = {}) {
   const paras = String(src ?? '').trim().split(/\n\s*\n/)
   return paras
     .filter((p) => p.trim())
@@ -444,7 +460,13 @@ export function mdLight(src) {
         .replace(/(^|[^*])\*([^*\s][^*]*)\*/g, '$1<em>$2</em>')
         .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
         .replace(/\n/g, '<br>')
-      h = h.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[Number(i)]}</code>`)
+      h = h.replace(/\u0000(\d+)\u0000/g, (_, i) => {
+        const c = codes[Number(i)]
+        const ref = opts.codeRefs ? parseCodeRef(c) : null
+        return ref
+          ? `<code class="coderef" role="button" tabindex="0" data-path="${escapeHtml(ref.path)}"${ref.line ? ` data-line="${ref.line}"` : ''}${ref.endLine ? ` data-end-line="${ref.endLine}"` : ''} title="View in the code pane (⌘/Ctrl-click: open in editor)">${c}</code>`
+          : `<code>${c}</code>`
+      })
       return `<p>${h}</p>`
     })
     .join('')
@@ -495,4 +517,52 @@ export function interpolateZoom(rho = Math.SQRT2) {
 export function fitBox(b, r, pad, maxZoom = 8) {
   const zoom = Math.max(1e-3, Math.min((r.width - 2 * pad) / b.width, (r.height - 2 * pad) / b.height, maxZoom))
   return { zoom, x: r.x + r.width / 2 - (b.x + b.width / 2) * zoom, y: r.y + r.height / 2 - (b.y + b.height / 2) * zoom }
+}
+
+// ---------------------------------------------------------------- host bridge helpers
+
+/** The console's chord name for a keydown (ADR 0063 forwarding): "mod+shift+k". */
+export function keyCombo(e) {
+  const k = String(e?.key ?? '').toLowerCase()
+  if (!k || ['meta', 'control', 'shift', 'alt'].includes(k)) return null
+  return [e.metaKey || e.ctrlKey ? 'mod' : '', e.shiftKey ? 'shift' : '', e.altKey ? 'alt' : '', k].filter(Boolean).join('+')
+}
+
+/** Forward a keydown to the host? Only chords (mod/alt) the page didn't handle itself. */
+export function shouldForwardKey(e) {
+  return !!e && !e.defaultPrevented && !!(e.metaKey || e.ctrlKey || e.altKey) && keyCombo(e) !== null
+}
+
+/** The parent frame's origin: ancestorOrigins (Chromium/WebKit) → referrer → our own origin. */
+export function parentOriginOf({ ancestorOrigins, referrer, origin }) {
+  const a = ancestorOrigins && ancestorOrigins.length ? ancestorOrigins[0] : ''
+  if (a && a !== 'null') return a
+  try {
+    if (referrer) return new URL(referrer).origin
+  } catch {
+    /* bad referrer */
+  }
+  return origin
+}
+
+/** Context-menu items for a node (`protoagent:contextmenu:open`). Ids carry no dots (the host namespaces them). */
+export function nodeMenuItems({ hasCode, paneOn, canDrill, canPresent }) {
+  const items = []
+  if (hasCode) {
+    if (paneOn !== false) items.push({ id: 'view', label: 'View code' })
+    items.push({ id: 'editor', label: 'Open in editor' })
+    items.push({ divider: true })
+  }
+  if (canDrill) items.push({ id: 'drill', label: 'Drill in' })
+  items.push({ id: 'details', label: 'Show details' })
+  if (canPresent) items.push({ id: 'present', label: 'Present from here' })
+  items.push({ divider: true })
+  items.push({ id: 'copy', label: 'Copy element id' })
+  return items
+}
+
+/** How a code link click routes: `{open_in}` — ⌘/Ctrl → editor; the pane when it's on, else the editor. */
+export function codeRoute(mods, paneOn) {
+  if (mods && (mods.metaKey || mods.ctrlKey)) return 'editor'
+  return paneOn === false ? 'editor' : 'pane'
 }
