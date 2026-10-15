@@ -434,13 +434,15 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
       {!record && (
       <div className="p-top" data-presenter-chrome>
         {tours.length > 1 && (
-          <Select className="p-tour" aria-label="Tour" value={tourId} onChange={(e) => onTour(e.target.value)}>
+          <span className="p-tour">
+          <Select aria-label="Tour" value={tourId} onChange={(e) => onTour(e.target.value)}>
             {tours.map((t) => (
               <option key={t.id} value={t.id}>
                 {t.title}
               </option>
             ))}
           </Select>
+          </span>
         )}
         {cropped && (
           <Button size="sm" title="This view is framed on its densest part so the text stays readable — show all of it" onClick={() => stage.current?.fitAll(450)}>

@@ -27,7 +27,7 @@ const frame = page.frames().find((f) => f.url().includes('/plugins/atlas/view'))
 // capture what the iframe posts to the console
 await frame.evaluate(() => { const orig = window.parent.postMessage.bind(window.parent); window.__sent = []; window.parent.postMessage = (m, o) => { window.__sent.push([m, o]); return orig(m, o) } })
 const paneOn = await frame.evaluate(() => window.__atlas?.paneOn)
-await frame.locator('.viewpick').selectOption('proto_agent_detail'); await wait(2600)
+await frame.locator('.viewpick select').selectOption('proto_agent_detail'); await wait(2600)
 await frame.locator('.react-flow__node', { hasText: /^Agent graph/ }).first().click({ position: { x: 30, y: 20 } }); await wait(600)
 const hint = await frame.locator('[data-testid=pane-hint]').count()
 await shot('bridge-details-code-actions')

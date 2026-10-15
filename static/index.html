@@ -32,7 +32,7 @@ overflow: hidden; text-overflow: ellipsis; max-width: 26ch }
 .crumb button:hover { background: var(--a-hover); color: var(--pl-color-fg) }
 .crumb button.here { color: var(--pl-color-fg); font-weight: 600 }
 .sp { flex: 1 1 0; min-width: 4px }
-.search { width: 22ch }
+.search { width: 22ch; flex: 0 1 22ch; min-width: 12ch }
 .search { position: relative }
 .hits { position: absolute; right: 0; top: 32px; z-index: 30; list-style: none; margin: 0; padding: 4px; width: 340px; max-height: 60vh; overflow: auto;
 background: var(--a-raised); border: 1px solid var(--a-border); border-radius: 8px; box-shadow: var(--a-shadow) }
@@ -96,7 +96,8 @@ code.coderef:hover { text-decoration-color: var(--a-accent) }
 .p-crumbs span + span::before { content: '›'; margin-right: 6px; opacity: .6 }
 .p-crumbs .here { color: var(--pl-color-fg); font-weight: 600 }
 .p-crumbs .focus { color: var(--a-accent); font-style: normal; margin-left: 4px }
-.p-top { position: absolute; top: 10px; right: 12px; display: flex; gap: 8px; align-items: center; z-index: 10 }
+.p-top { position: absolute; top: 10px; right: 12px; display: flex; gap: var(--pl-space-2); align-items: center; z-index: 10; white-space: nowrap }
+.viewpick { flex: 0 1 30ch; min-width: 10ch; display: flex } .p-tour { width: 24ch; display: flex }
 .p-counter { font-size: var(--pl-font-size-sm); color: var(--a-muted); font-variant-numeric: tabular-nums }
 .notes { position: absolute; left: 50%; bottom: var(--pl-space-4); transform: translateX(-50%); width: min(760px, calc(100% - 32px));
 padding: var(--pl-space-3) var(--pl-space-4); border-radius: var(--pl-radius-lg); z-index: 10;
@@ -147,7 +148,7 @@ border: 1px solid var(--a-accent); transform: rotate(45deg) }
     document.head.insertBefore(l, document.getElementById("atlas-css"));
     // The viewer bundle, BASE-prefixed (the page URL has no trailing slash, so no relative URLs).
     var s = document.createElement("script");
-    s.type = "module"; s.src = BASE + "/plugins/atlas/static/assets/atlas-YjuuCjdG.js";
+    s.type = "module"; s.src = BASE + "/plugins/atlas/static/assets/atlas-KXAjFzod.js";
     s.onerror = function () {
       var b = document.getElementById("boot");
       if (b) b.textContent = "Atlas could not load its viewer bundle (" + s.src + ").";

@@ -8,7 +8,7 @@ async function main() {
   const kit = await loadKit()
   kit.initPluginView()
   createRoot(document.getElementById('root')!).render(
-    <ToastProvider position="bottom-center">
+    <ToastProvider position="top-center">
       <App kit={kit} />
     </ToastProvider>,
   )

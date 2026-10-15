@@ -589,7 +589,8 @@ export function App({ kit }: { kit: Kit }) {
           ))}
         </nav>
         <span className="sp" />
-        <Select className="viewpick" aria-label="View" value={viewId ?? ''} onChange={(e) => setViewId(e.target.value)}>
+        <span className="viewpick">
+        <Select aria-label="View" value={viewId ?? ''} onChange={(e) => setViewId(e.target.value)}>
           {viewOptions(data).map((o: any) => (
             <option key={o.id} value={o.id}>
               {' '.repeat(o.depth * 2)}
@@ -598,6 +599,7 @@ export function App({ kit }: { kit: Kit }) {
             </option>
           ))}
         </Select>
+        </span>
         <div className="search">
           <Input
             ref={searchRef}
