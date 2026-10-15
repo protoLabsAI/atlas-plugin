@@ -369,6 +369,8 @@ the YAML to the recorder (Campaign Studio's `shotscript`) unchanged. Before you 
 - A slide that shows a whole dynamic view (no `step`) walks every step by itself, which is good
   footage for a flow.
 - Keep notes short (one or two sentences). In record mode they become large on-screen captions.
+- The last caption gets 2.5 s of extra reading time, then fades, then the diagram holds a clean 2 s
+  beat before the take ends. Set `"end_hold_ms"` on the tour to change the extra time.
 
 ## 10. Common mistakes (real 1.60.0 errors)
 

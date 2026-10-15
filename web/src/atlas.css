@@ -167,3 +167,7 @@ code.coderef:hover { text-decoration-color: var(--a-accent) }
 .presenter--record .notes-body { font-size: clamp(18px, 2.4vw, 28px); line-height: 1.35; font-weight: var(--pl-font-weight-medium, 500); margin: 0 }
 .presenter--record .p-crumbs { font-size: 15px }
 .atlas-record .banner.compact { display: none }
+
+.notes { transition: opacity var(--caption-fade, 400ms) ease }
+.notes.notes--out { opacity: 0 }
+@media (prefers-reduced-motion: reduce) { .notes { transition: none } }

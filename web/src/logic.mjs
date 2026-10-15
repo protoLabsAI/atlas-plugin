@@ -141,7 +141,10 @@ export function cleanTours(tours, data) {
       if (Number.isInteger(s.hold_ms) && s.hold_ms >= 500 && s.hold_ms <= 60000) slide.hold_ms = s.hold_ms
       slides.push(slide)
     }
-    if (slides.length) out.push({ id: String(t.id ?? `tour${out.length + 1}`), title: cleanTitle(t.title ?? t.id ?? 'Tour'), slides })
+    if (!slides.length) continue
+    const tour = { id: String(t.id ?? `tour${out.length + 1}`), title: cleanTitle(t.title ?? t.id ?? 'Tour'), slides }
+    if (Number.isInteger(t.end_hold_ms) && t.end_hold_ms >= 0 && t.end_hold_ms <= 30000) tour.end_hold_ms = t.end_hold_ms
+    out.push(tour)
   }
   return out
 }
@@ -683,7 +686,7 @@ export function codeRoute(mods, paneOn) {
 }
 
 // ---------------------------------------------------------------- autoplay / recording
-// The autoplay schedule. MUST match record.py (SLIDE_* / STEP_* / FINAL_HOLD_MS) — the
+// The autoplay schedule. MUST match record.py (SLIDE_* / STEP_* / END_HOLD_MS / CAPTION_FADE_MS / BEAT_MS) — the
 // backend's shot script waits for the same timeline.
 export const MIN_SLIDE_MS = 2500
 export const SLIDE_BASE_MS = 1200
@@ -691,7 +694,12 @@ export const PER_WORD_MS = 260
 export const MAX_SLIDE_MS = 15000
 export const MIN_STEP_MS = 1800
 export const STEP_BASE_MS = 1000
-export const FINAL_HOLD_MS = 3000
+// the end of a take: the last caption stays `end_hold_ms` longer (tour field, default 2.5 s), then
+// fades (400 ms), then the clean diagram holds a 2 s beat — then tour-done
+export const END_HOLD_MS = 2500
+export const CAPTION_FADE_MS = 400
+export const BEAT_MS = 2000
+export const outroMs = (endHold = END_HOLD_MS) => endHold + CAPTION_FADE_MS + BEAT_MS
 
 export const words = (text) => (String(text ?? '').replace(/[*`_[\]()]/g, ' ').match(/\S+/g) ?? []).length
 

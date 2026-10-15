@@ -9,7 +9,12 @@ view, start the tour from the Present menu's "Record" item, ``mark: start``, wai
 ``tour-done``, ``mark: end``. No code coupling — it is just text.
 
 The timing here MUST match the viewer's (``web/src/logic.mjs`` ``slideDwellMs`` / ``stepDwellMs``
-/ ``FINAL_HOLD_MS``) — ``tests/test_record.py`` pins both to the same numbers.
+/ ``END_HOLD_MS`` / ``CAPTION_FADE_MS`` / ``BEAT_MS``) — ``tests/test_record.py`` pins both to the same
+numbers.
+
+The end of a take: the last slide's reading-time dwell, then ``end_hold_ms`` more (a tour field,
+default 2.5 s) so the last caption can be read, then the caption fades out (400 ms) and the clean
+diagram holds a 2 s beat — and only then ``data-atlas-state=tour-done`` (where an outro cuts).
 """
 
 from __future__ import annotations
@@ -26,7 +31,9 @@ PER_WORD_MS = 260
 MAX_SLIDE_MS = 15_000
 MIN_STEP_MS = 1800
 STEP_BASE_MS = 1000
-FINAL_HOLD_MS = 3000
+END_HOLD_MS = 2500  # default extra time on the last caption (tour `end_hold_ms`, 0–30000)
+CAPTION_FADE_MS = 400
+BEAT_MS = 2000  # the clean diagram, no caption, before tour-done
 # the camera: a view change (zoom/fade, one hop) and a same-view focus ease, at normal speed
 VIEW_CHANGE_MS = 1500
 SAME_VIEW_MS = 900
@@ -53,6 +60,21 @@ def step_dwell_ms(label: str | None) -> int:
     return min(MAX_SLIDE_MS, max(MIN_STEP_MS, STEP_BASE_MS + words(label) * PER_WORD_MS))
 
 
+def end_hold_ms(tours: dict | None, tour: str) -> int:
+    """The tour's ``end_hold_ms`` (validated 0–30000) or the default."""
+    for t in L.tour_list(tours):
+        if t.get("id") == tour:
+            v = t.get("end_hold_ms")
+            if isinstance(v, int) and not isinstance(v, bool) and L.END_HOLD_MIN_MS <= v <= L.END_HOLD_MAX_MS:
+                return v
+    return END_HOLD_MS
+
+
+def outro_ms(end_hold: int = END_HOLD_MS) -> int:
+    """From the last slide's dwell ending to tour-done."""
+    return end_hold + CAPTION_FADE_MS + BEAT_MS
+
+
 def tour_slides(model: dict, tours: dict | None, tour: str) -> tuple[list[dict] | None, str, str]:
     """``(slides, title, "")`` or ``(None, "", why)``."""
     if tour == "auto":
@@ -65,9 +87,9 @@ def tour_slides(model: dict, tours: dict | None, tour: str) -> tuple[list[dict] 
     return None, "", f"unknown tour {tour!r}. Tours: {', '.join(known)}"
 
 
-def timeline(model: dict, slides: list[dict], speed: str = "normal") -> list[int]:
+def timeline(model: dict, slides: list[dict], speed: str = "normal", end_hold: int = END_HOLD_MS) -> list[int]:
     """Milliseconds from the start of the take until each slide is DONE (cumulative), the last
-    entry including the final hold — the autoplay schedule the viewer runs."""
+    entry running on to tour-done (end hold + caption fade + beat) — the schedule the viewer runs."""
     k = SPEED.get(speed, 1.0)
     vs = L.views(model)
     out, t, prev = [], 0, None
@@ -82,7 +104,7 @@ def timeline(model: dict, slides: list[dict], speed: str = "normal") -> list[int
                 t += step_dwell_ms(e.get("label"))
         out.append(t)
     if out:
-        out[-1] += FINAL_HOLD_MS
+        out[-1] += outro_ms(end_hold)
     return out
 
 
@@ -146,7 +168,7 @@ def shot_script(
         return None, 0, f"base_url {base_url!r} must be an http(s) URL like http://localhost:7870"
     if bearer_env and not re.fullmatch(r"[A-Z_][A-Z0-9_]*", bearer_env):
         return None, 0, "bearer_env must be an environment variable NAME like CAMPAIGN_APP_TOKEN"
-    marks = timeline(model, slides, speed)
+    marks = timeline(model, slides, speed, end_hold_ms(tours, tour))
     duration = marks[-1]
     total_s = min(900, max(120, (duration + 90_000) // 1000))
     f = _yaml_str(FRAME)

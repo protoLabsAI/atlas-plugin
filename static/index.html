@@ -147,7 +147,10 @@ background: var(--a-raised); border: 1px solid var(--a-border); border-radius: v
 background: color-mix(in srgb, var(--pl-color-bg, #0a0a0c) 82%, transparent); border-color: transparent; box-shadow: none }
 .presenter--record .notes-body { font-size: clamp(18px, 2.4vw, 28px); line-height: 1.35; font-weight: var(--pl-font-weight-medium, 500); margin: 0 }
 .presenter--record .p-crumbs { font-size: 15px }
-.atlas-record .banner.compact { display: none }</style>
+.atlas-record .banner.compact { display: none }
+.notes { transition: opacity var(--caption-fade, 400ms) ease }
+.notes.notes--out { opacity: 0 }
+@media (prefers-reduced-motion: reduce) { .notes { transition: none } }</style>
 <script>
   // RULE 3 - slug-aware base: "" on the host window, "/agents/<slug>" through the fleet proxy.
   var BASE = location.pathname.split("/plugins/")[0];
@@ -159,7 +162,7 @@ background: color-mix(in srgb, var(--pl-color-bg, #0a0a0c) 82%, transparent); bo
     document.head.insertBefore(l, document.head.querySelector("style"));
     // The viewer bundle, BASE-prefixed (the page URL has no trailing slash, so no relative URLs).
     var s = document.createElement("script");
-    s.type = "module"; s.src = BASE + "/plugins/atlas/static/assets/atlas-ymYjSgg0.js";
+    s.type = "module"; s.src = BASE + "/plugins/atlas/static/assets/atlas-CxXDcQQD.js";
     s.onerror = function () {
       var b = document.getElementById("boot");
       if (b) b.textContent = "Atlas could not load its viewer bundle (" + s.src + ").";

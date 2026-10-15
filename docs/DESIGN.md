@@ -43,6 +43,8 @@ alongside the original url; `http(s)` links stay `{kind:"web", url}`.
 ```
 `view` required; `focus` = element FQN to highlight; `step` = dynamic-view walkthrough step (1-based);
 `hold_ms` = autoplay/record dwell for the slide (500–60000; default from the note's length);
+a tour's `end_hold_ms` (0–30000, default 2500) = extra time on the last caption before it fades and a
+2 s clean beat ends the take;
 `via` = node to zoom through when entering the view; `note` = speaker notes (markdown-light).
 With no tours file, the viewer derives an **auto-tour**: `index`, then each scoped view in model
 tree order, then each dynamic view.

@@ -3,13 +3,13 @@
 // Tab focus · 1–9 jump · N notes · F fullscreen · [ ] slower/faster.
 import type { LikeC4Model } from '@likec4/core/model'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { FINAL_HOLD_MS, cycle, dynamicSteps, mdLight, presenterKey, slideDwellMs, stepDwellMs } from './logic.mjs'
+import { BEAT_MS, CAPTION_FADE_MS, END_HOLD_MS, cycle, dynamicSteps, mdLight, presenterKey, slideDwellMs, stepDwellMs } from './logic.mjs'
 import { applyHighlight, clearHighlight } from './highlight'
 import { getSpeed, onSpeed, stepSpeed } from './motion'
 import { Stage, type StageHandle } from './Stage'
 
 export type Slide = { view: string; focus?: string | string[]; edges?: string[]; step?: number; via?: string; note?: string; hold_ms?: number }
-export type Tour = { id: string; title: string; slides: Slide[]; auto?: boolean }
+export type Tour = { id: string; title: string; slides: Slide[]; auto?: boolean; end_hold_ms?: number }
 export type PresenterCmd = { seq: number; slide?: number; adhoc?: Slide }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
@@ -63,6 +63,7 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
   const busy = useRef(false)
   const manual = useRef(false)
   const [done, setDone] = useState(false)
+  const [captionOut, setCaptionOut] = useState(false)
   const [noteSlide, setNoteSlide] = useState(first)
   const st = useRef({ slide, focused, walk })
   st.current = { slide, focused, walk }
@@ -293,7 +294,12 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
         }
       }
       if (!live || manual.current) return
-      await dwell(FINAL_HOLD_MS)
+      // the end: the last caption stays a little longer, fades, then a clean beat → tour-done
+      const t = tours.find((x) => x.id === tourId) as any
+      await dwell(Number.isInteger(t?.end_hold_ms) ? t.end_hold_ms : END_HOLD_MS)
+      if (!live || manual.current) return
+      if (record) setCaptionOut(true)
+      await dwell(CAPTION_FADE_MS + BEAT_MS)
       if (live && !manual.current) {
         setDone(true)
         onDone?.()
@@ -414,7 +420,7 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
       </div>
       )}
       {showNotes && (
-        <aside className="notes" aria-live="polite">
+        <aside className={`notes${captionOut ? ' notes--out' : ''}`} aria-live="polite" style={{ ['--caption-fade' as any]: `${CAPTION_FADE_MS}ms` }}>
           {!record && (
           <div className="notes-head">
             {tours.find((t) => t.id === tourId)?.title ?? 'Tour'} · slide {slide + 1}
