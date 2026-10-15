@@ -49,6 +49,7 @@ class _Registry:
         self.config = dict(config or {})
         self.tools, self.routers, self.skill_dirs = [], [], []
         self.emitted, self.navigations, self.gaps, self.steps = [], [], [], {}
+        self.handlers: dict[str, list] = {}
 
     def live_config(self):
         return self.config
@@ -76,6 +77,9 @@ class _Registry:
 
     def navigate(self, view=""):
         self.navigations.append(view)
+
+    def on(self, topic, handler):
+        self.handlers.setdefault(topic, []).append(handler)
 
 
 @pytest.fixture

@@ -4,10 +4,11 @@
 import type { LikeC4Model } from '@likec4/core/model'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { cycle, dynamicSteps, mdLight, presenterKey } from './logic.mjs'
+import { applyHighlight, clearHighlight } from './highlight'
 import { getSpeed, onSpeed, stepSpeed } from './motion'
 import { Stage, type StageHandle } from './Stage'
 
-export type Slide = { view: string; focus?: string; step?: number; via?: string; note?: string }
+export type Slide = { view: string; focus?: string | string[]; edges?: string[]; step?: number; via?: string; note?: string }
 export type Tour = { id: string; title: string; slides: Slide[]; auto?: boolean }
 export type PresenterCmd = { seq: number; slide?: number; adhoc?: Slide }
 
@@ -39,9 +40,11 @@ type Props = {
   onTour: (id: string) => void
   onExit: (view: string) => void
   onNoteClick?: (e: React.MouseEvent | React.KeyboardEvent) => void
+  /** what's on screen (for atlas.viewing / Ask) */
+  onState?: (s: { view: string; slide: number; step: number | null }) => void
 }
 
-export function Presenter({ model, data, tours, tourId, start, cmd, scheme, themeCss, onTour, onExit, onNoteClick }: Props) {
+export function Presenter({ model, data, tours, tourId, start, cmd, scheme, themeCss, onTour, onExit, onNoteClick, onState }: Props) {
   const tour = (tours.find((t) => t.id === tourId) ?? tours[0]).slides
   const first = Math.min(Math.max(start, 0), tour.length - 1)
   const stage = useRef<StageHandle>(null)
@@ -79,15 +82,20 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
       return
     }
     if (ctx.activeWalkthrough) d.stopWalkthrough()
-    if (s.focus) {
-      d.focusNode(s.focus as any)
-      setFocused(s.focus)
+    clearHighlight(d)
+    const many = Array.isArray(s.focus) ? s.focus : s.focus ? [s.focus] : []
+    if (many.length > 1 || s.edges?.length) {
+      applyHighlight(d, stage.current?.xyflow(), data?.views?.[s.view], { view: s.view, focus: many, edges: s.edges ?? [] })
+      setFocused(null)
+    } else if (many.length === 1) {
+      d.focusNode(many[0] as any)
+      setFocused(many[0])
     } else if (sameView) {
       d.send({ type: 'key.esc' } as any)
       d.fitDiagram(450)
       setFocused(null)
     }
-  }, [])
+  }, [data])
 
   const run = useCallback(async (fn: () => Promise<void>) => {
     if (busy.current) return
@@ -269,6 +277,11 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
     window.addEventListener('keydown', onKey, { capture: true })
     return () => window.removeEventListener('keydown', onKey, { capture: true })
   })
+
+  const shownStep = (adhoc ?? tour[slide])?.step ?? (walk || null)
+  useEffect(() => {
+    onState?.({ view, slide, step: shownStep })
+  }, [view, slide, shownStep, onState])
 
   // test hook
   useEffect(() => {

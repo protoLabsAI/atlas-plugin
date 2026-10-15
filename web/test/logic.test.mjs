@@ -157,8 +157,12 @@ test('cycle + slideForView', () => {
 
 test('parseShow (atlas.show bus payloads)', () => {
   const tours = toursFor(null, data)
-  assert.deepEqual(parseShow({ view: 'turn', step: 2 }, data, tours), { kind: 'view', view: 'turn', step: 2, focus: undefined, present: false })
-  assert.deepEqual(parseShow({ view: 'index', focus: 'app', present: true }, data, tours), { kind: 'view', view: 'index', step: undefined, focus: 'app', present: true })
+  assert.deepEqual(parseShow({ view: 'turn', step: 2 }, data, tours), { kind: 'view', view: 'turn', step: 2, focus: [], edges: [], note: undefined, present: false })
+  assert.deepEqual(parseShow({ view: 'index', focus: 'app', present: true }, data, tours), { kind: 'view', view: 'index', step: undefined, focus: ['app'], edges: [], note: undefined, present: true })
+  // live navigation: many foci, edges, a callout; unknown ids dropped; a note needs an anchor
+  const live = parseShow({ view: 'index', focus: ['app', 'ghost', 'gateway'], edges: ['nope'], note: ' Hi ' }, data, tours)
+  assert.deepEqual([live.focus, live.edges, live.note], [['app', 'gateway'], [], 'Hi'])
+  assert.equal(parseShow({ view: 'index', note: 'x' }, data, tours).note, undefined)
   assert.equal(parseShow({ view: 'nope' }, data, tours), null)
   assert.equal(parseShow({ view: 'turn', step: 7 }, data, tours).step, undefined)
   // slides are 1-based on the wire (atlas_show validates 1..len)

@@ -12,9 +12,11 @@ type Props = {
   /** `how`: a click's modifiers (click = pane, ⌘/Ctrl = editor) or an explicit target */
   onCode: (link: any, note: string, how: Mods | 'pane' | 'editor') => void
   onCodeRefClick: (e: React.MouseEvent | React.KeyboardEvent) => void
+  /** "Ask about this" (protoagent:chat:compose) — absent when the host can't */
+  onAsk?: () => void
 }
 
-export function Details({ data, fqn, paneOn, onClose, onOpenView, onCode, onCodeRefClick }: Props) {
+export function Details({ data, fqn, paneOn, onClose, onOpenView, onCode, onCodeRefClick, onAsk }: Props) {
   const el = data?.elements?.[fqn]
   if (!el) return null
   const summary = descriptionText(el.summary)
@@ -48,10 +50,19 @@ export function Details({ data, fqn, paneOn, onClose, onOpenView, onCode, onCode
       {el.technology && <span className="pl-badge d-tech">{el.technology}</span>}
       {summary && summary !== desc && <div className="d-summary" onClick={onCodeRefClick} onKeyDown={onCodeRefClick} dangerouslySetInnerHTML={{ __html: mdLight(summary, { codeRefs: true }) }} />}
       {desc && <div className="d-desc" onClick={onCodeRefClick} onKeyDown={onCodeRefClick} dangerouslySetInnerHTML={{ __html: mdLight(desc, { codeRefs: true }) }} />}
-      {drill && (
-        <button className="pl-btn pl-btn--sm d-drill" onClick={() => onOpenView(drill)}>
-          Open drill-down ›
-        </button>
+      {(drill || onAsk) && (
+        <div className="d-actions">
+          {drill && (
+            <button className="pl-btn pl-btn--sm d-drill" onClick={() => onOpenView(drill)}>
+              Open drill-down ›
+            </button>
+          )}
+          {onAsk && (
+            <button className="pl-btn pl-btn--sm" data-testid="ask" onClick={onAsk} title="Draft a question about this element in the chat box">
+              Ask about this
+            </button>
+          )}
+        </div>
       )}
       {links.length > 0 && (
         <section>

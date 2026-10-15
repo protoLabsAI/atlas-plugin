@@ -4,7 +4,7 @@ A [protoAgent](https://github.com/protoLabsAI/protoAgent) plugin. Atlas renders 
 [LikeC4](https://likec4.dev) model as a console view: one model, many views. Click an element
 to drill into it, follow its code links into the console's code pane, and run guided tours in
 presenter mode. The agent authors the model with its normal file tools (guided by the bundled
-`atlas` skill) and checks, describes, and shows it with three tools.
+`atlas` skill) and checks, describes, and narrates it live with four tools.
 
 Design contract: [`docs/DESIGN.md`](docs/DESIGN.md).
 
@@ -37,8 +37,9 @@ presenter tours. If you don't, the viewer derives an auto-tour.
 | Tool | What it does |
 |---|---|
 | `atlas_validate()` | Runs the engine and Atlas lint. Reports engine errors as `file:line` and lint findings: no drill-down view, missing code-link files, sequence views that mix an element with its descendant, broken tour slides, and empty views. |
-| `atlas_describe(view="")` | With no argument, lists the view tree and tours. With a view, lists that view's nodes and edges, or its steps. |
-| `atlas_show(view, step, focus, tour, slide, present)` | Checks the target, emits `atlas.show`, and opens the Atlas view. |
+| `atlas_describe(view="", current=False)` | With no argument, lists the view tree and tours. With a view, lists that view's nodes and edges, or its numbered steps (`from → to: label`). `current=True`: what the operator is looking at now — view, step, selected element, highlights, presenter mode. |
+| `atlas_show(view, element, focus, relations, note, step, drill, tour, slide, present)` | Live navigation. `element` picks the view itself (the smallest view containing it/them; `drill=True` → its own drill-down). `focus` highlights element(s) and dims the rest; `relations=[[a, b]]` highlights the edges (or shortest path) between them; `note` pins a ≤ 280-char callout to the first highlighted node; `step` is a walkthrough step or `"next"`/`"prev"` relative to the operator's. Unknown ids get close-match suggestions. Emits `atlas.show` and opens the view. |
+| `atlas_clear()` | Removes highlights and callouts (`atlas.clear`). |
 
 ## HTTP
 

@@ -59,8 +59,15 @@ Page + assets on the PUBLIC prefix (iframe navigations carry no bearer); data GA
 
 ## Bus
 
-`atlas.show` `{view, step?, focus?, tour?, slide?, present?: bool}` — emitted by the `atlas_show`
-tool; the open viewer navigates there (and enters presenter mode when `present`).
+`atlas.show` `{view, step?, focus?: [node id], edges?: [edge id], note?, tour?, slide?, present?: bool}`
+— emitted by `atlas_show` (fully resolved: the backend picks the view, maps elements onto view
+nodes, finds relation paths, turns `step: "next"` into a number). The open viewer zooms there, dims
+everything but the highlighted set, fits the camera to it and pins `note` as a callout (or enters
+presenter mode when `present`). `atlas.clear` `{}` drops highlights + callouts.
+
+`atlas.viewing` `{view, step, selected, focus, edges, note, mode, tour, slide}` — published by the
+viewer (debounced) whenever what the operator sees changes; the backend keeps the latest in
+memory (`registry.on`) for `atlas_describe(current=True)` and relative steps.
 
 ## Agent tools
 
@@ -72,12 +79,16 @@ tool; the open viewer navigates there (and enters presenter mode when `present`)
     drops steps);
   - tours referencing unknown views / elements / out-of-range steps;
   - empty views.
-* `atlas_describe(view: str = "")` — no arg: the view tree (id, title, scoped-of, kind) + tours.
-  With a view: its nodes (fqn, title, kind, has drill-down) and edges, so the agent can talk about
-  and navigate the diagram.
-* `atlas_show(view, step=None, focus=None, tour=None, slide=None, present=False)` — check the target
-  exists, emit `atlas.show`, return a one-line confirmation. Writing the model is done with the
-  normal filesystem tools, guided by the skill.
+* `atlas_describe(view: str = "", current: bool = False)` — no arg: the view tree (id, title,
+  scoped-of, kind) + tours. With a view: its nodes (fqn, title, kind, has drill-down) and edges, or
+  a dynamic view's steps (`N. From → To: label [from.fqn → to.fqn]`). `current=True`: the operator's
+  latest `atlas.viewing`.
+* `atlas_show(view="", element=None, focus=None, relations=None, note=None, step=None, drill=False,
+  tour=None, slide=None, present=False)` — resolve + validate (see Bus), emit `atlas.show`, return a
+  one-line confirmation. Element ids resolve by fqn, else a unique title / last segment; misses list
+  close matches; a bad step lists every step. Writing the model is done with the normal filesystem
+  tools, guided by the skill.
+* `atlas_clear()` — emit `atlas.clear`.
 
 ## Node resolution
 

@@ -66,7 +66,8 @@ def test_register_wires_everything(registry, monkeypatch):
     atlas.register(registry)
     prefixes = [p for p, _ in registry.routers]
     assert prefixes == ["/plugins/atlas", "/api/plugins/atlas"]
-    assert {t.name for t in registry.tools} == {"atlas_validate", "atlas_describe", "atlas_show"}
+    assert {t.name for t in registry.tools} == {"atlas_validate", "atlas_describe", "atlas_show", "atlas_clear"}
+    assert "atlas.viewing" in registry.handlers  # the viewer's "what the operator sees" feed
     assert nodes.STEP_INSTALL_NODE in registry.steps
     assert "skills" in registry.skill_dirs
     # a node was found → the gap is cleared (never raised)

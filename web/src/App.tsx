@@ -5,10 +5,11 @@ import { Details } from './Details'
 import { Explorer, type ExploreCmd } from './Explorer'
 import { Presenter, type PresenterCmd, type Tour } from './Presenter'
 import { BASE, currentScheme, embedded, fromParent, post, subscribeBus, type Kit } from './host'
+import type { Highlight } from './highlight'
 import { setSpeed } from './motion'
 import { themeFor } from './theme'
 import {
-  codeOpenMessage, codeRoute, displayFile, dynamicSteps, errorFileRel, keepView, keyCombo, nodeMenuItems, normaliseLinks,
+  askPrompt, codeOpenMessage, codeRoute, hostSupportsCompose, viewingPayload, displayFile, dynamicSteps, errorFileRel, keepView, keyCombo, nodeMenuItems, normaliseLinks,
   parseShow, resolveProject, scopedViewOf, searchModel, shouldForwardKey, slideForView, toursFor, viewChain, viewForElement, viewOptions,
 } from './logic.mjs'
 
@@ -161,6 +162,8 @@ export function App({ kit }: { kit: Kit }) {
   const [ecmd, setEcmd] = useState<ExploreCmd | null>(null)
   const [pcmd, setPcmd] = useState<PresenterCmd | null>(null)
   const [walk, setWalk] = useState<number | null>(null)
+  const [highlight, setHighlight] = useState<Highlight | null>(null)
+  const [presenting, setPresenting] = useState<{ view: string; slide: number; step: number | null } | null>(null)
   const [query, setQuery] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
@@ -198,13 +201,17 @@ export function App({ kit }: { kit: Kit }) {
   // ---- code links → core's code pane (click) or the operator's editor (⌘/Ctrl-click)
   // Pane availability: GET /api/runtime/status → code_pane.enabled (null = unknown/older host).
   const [paneOn, setPaneOn] = useState<boolean | null>(null)
+  // "Ask about this" → protoagent:chat:compose (core ≥ 0.206.0; unknown version → shown)
+  const [canCompose, setCanCompose] = useState(embedded)
   useEffect(() => {
     const check = async () => {
       try {
         const r = await kit.apiFetch('/api/runtime/status', { cache: 'no-store' })
         if (!r.ok) return
-        const v = (await r.json())?.code_pane?.enabled
+        const st = await r.json()
+        const v = st?.code_pane?.enabled
         setPaneOn(typeof v === 'boolean' ? v : null)
+        setCanCompose(embedded && hostSupportsCompose(st?.version))
       } catch {
         /* older host: keep unknown */
       }
@@ -297,8 +304,9 @@ export function App({ kit }: { kit: Kit }) {
     }
     if (req.present) {
       const t = mode.kind === 'present' ? tours.find((x) => x.id === mode.tour) ?? tours[0] : tours[0]
-      const exact = t.slides.findIndex((s) => s.view === req.view && (s.step ?? 0) === (req.step ?? 0) && (s.focus ?? '') === (req.focus ?? ''))
-      const adhoc = { view: req.view, step: req.step, focus: req.focus, note: data.views[req.view]?.title }
+      const live = req.focus.length > 1 || req.edges.length > 0 || !!req.note
+      const exact = live ? -1 : t.slides.findIndex((s) => s.view === req.view && (s.step ?? 0) === (req.step ?? 0) && (s.focus ?? '') === (req.focus[0] ?? ''))
+      const adhoc = { view: req.view, step: req.step, focus: req.focus.length > 1 ? req.focus : req.focus[0], edges: req.edges, note: req.note ?? data.views[req.view]?.title }
       if (mode.kind === 'present') setPcmd({ seq: ++seq.current, slide: exact >= 0 ? exact : undefined, adhoc: exact >= 0 ? undefined : adhoc })
       else if (exact >= 0) present(t.id, exact)
       else {
@@ -309,12 +317,25 @@ export function App({ kit }: { kit: Kit }) {
     }
     if (mode.kind === 'present') setMode({ kind: 'explore' })
     setViewId(req.view)
-    if (req.step) command({ view: req.view, step: req.step })
-    else if (req.focus) {
-      command({ view: req.view, focus: req.focus })
-      setSelected(req.focus)
-    } else command({ view: req.view, fit: true })
+    setSelected(null)
+    if (req.step) {
+      setHighlight(null)
+      command({ view: req.view, step: req.step })
+    } else if (req.focus.length || req.edges.length) {
+      const h = { view: req.view, focus: req.focus, edges: req.edges, note: req.note }
+      setHighlight(h)
+      command({ view: req.view, highlight: h })
+    } else {
+      setHighlight(null)
+      command({ view: req.view, fit: true })
+    }
   }
+  const clearLive = useCallback(() => {
+    setHighlight((h) => {
+      if (h) command({ view: h.view, clear: true })
+      return null
+    })
+  }, [command])
   useEffect(() => {
     if (data && pendingShow.current) {
       const d = pendingShow.current
@@ -334,6 +355,7 @@ export function App({ kit }: { kit: Kit }) {
         lastSeq = m.seq
       }
       if (m.topic === 'atlas.show' || String(m.topic).endsWith('.atlas.show')) showRef.current(m.data ?? {})
+      else if (m.topic === 'atlas.clear' || String(m.topic).endsWith('.atlas.clear')) clearRef.current()
     }
     window.addEventListener('message', onMsg)
     subscribeBus()
@@ -358,6 +380,7 @@ export function App({ kit }: { kit: Kit }) {
       if (to) setViewId(to)
     } else if (id === 'present') present(undefined, slideForView(tours[0]?.slides ?? [], viewId ?? 'index'))
     else if (id === 'copy') void copyText(fqn).then((ok) => showToast(ok ? `Copied ${fqn}` : fqn))
+    else if (id === 'ask') ask(fqn)
   }
   const onNodeMenu = useCallback(
     (fqn: string, node: any, e: MouseEvent) => {
@@ -371,10 +394,11 @@ export function App({ kit }: { kit: Kit }) {
         paneOn,
         canDrill: !!(node?.navigateTo ?? scopedViewOf(data, fqn)),
         canPresent: tours.length > 0,
+        canAsk: canCompose,
       })
       post({ type: 'protoagent:contextmenu:open', x: e.clientX, y: e.clientY, items })
     },
-    [data, paneOn, tours.length],
+    [data, paneOn, tours.length, canCompose],
   )
 
   // ---- host chords: forward ⌘/Ctrl/Alt keys Atlas didn't handle (⌘⇧K palette etc. keep working)
@@ -388,6 +412,45 @@ export function App({ kit }: { kit: Kit }) {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
+
+  // ---- atlas.clear from the bus
+  const clearRef = useRef<() => void>(() => {})
+  clearRef.current = clearLive
+
+  // ---- "Ask about this" → the console's chat draft (protoagent:chat:compose; never sends)
+  const lastAsk = useRef(0)
+  const ask = useCallback(
+    (fqn?: string | null) => {
+      if (!data || !canCompose) return
+      const now = Date.now()
+      if (now - lastAsk.current < 1000) return // the host allows 1/s per view
+      lastAsk.current = now
+      const v = mode.kind === 'present' ? presenting?.view : viewId
+      const text = askPrompt(data, { view: v, fqn: fqn ?? undefined, step: (mode.kind === 'present' ? presenting?.step : walk) ?? undefined })
+      if (post({ type: 'protoagent:chat:compose', text })) showToast('Added to the chat box — edit and send')
+    },
+    [data, canCompose, mode.kind, presenting, viewId, walk, showToast],
+  )
+
+  // ---- what the operator sees → atlas.viewing (debounced) for atlas_describe(current=true)
+  const viewing = useMemo(
+    () =>
+      data
+        ? viewingPayload(
+            mode.kind === 'present'
+              ? { mode: 'present', view: presenting?.view ?? null, step: presenting?.step ?? null, tour: mode.tour, slide: presenting?.slide ?? mode.start }
+              : { mode: 'explore', view: viewId, step: walk, selected, highlight },
+          )
+        : null,
+    [data, mode, presenting, viewId, walk, selected, highlight],
+  )
+  const viewingKey = JSON.stringify(viewing)
+  useEffect(() => {
+    if (!viewing) return
+    const t = window.setTimeout(() => post({ type: 'protoagent:publish', topic: 'atlas.viewing', data: viewing }), 400)
+    return () => window.clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewingKey])
 
   // ---- keyboard (explore): "/" search, "p" present
   useEffect(() => {
@@ -409,7 +472,7 @@ export function App({ kit }: { kit: Kit }) {
 
   // ---- test hook
   useEffect(() => {
-    ;(window as any).__atlas = { view: viewId, mode: mode.kind, selected, walk, paneOn, hash: resp?.hash, ok: resp?.ok, stale: resp?.stale, tours: tours.map((t) => [t.id, t.slides.length]), scheme, base: BASE, embedded }
+    ;(window as any).__atlas = { view: viewId, mode: mode.kind, selected, walk, paneOn, highlight, viewing, canCompose, hash: resp?.hash, ok: resp?.ok, stale: resp?.stale, tours: tours.map((t) => [t.id, t.slides.length]), scheme, base: BASE, embedded }
   })
 
   // ---------------------------------------------------------------- render
@@ -460,6 +523,7 @@ export function App({ kit }: { kit: Kit }) {
           onTour={(id) => setMode({ kind: 'present', tour: id, start: 0, nonce: ++seq.current })}
           onExit={exitPresent}
           onNoteClick={onCodeRefClick}
+          onState={setPresenting}
         />
       </div>
     )
@@ -531,7 +595,17 @@ export function App({ kit }: { kit: Kit }) {
       <main className="main">
         <div className="canvas">
           {viewId && v ? (
-            <Explorer model={model!.m} data={data} viewId={viewId} scheme={scheme} themeCss={themeCss} cmd={ecmd} onNavigate={(to) => (setViewId(to), setSelected(null))} onSelect={setSelected} onWalk={setWalk} onNodeMenu={onNodeMenu} />
+            <Explorer model={model!.m} data={data} viewId={viewId} scheme={scheme} themeCss={themeCss} cmd={ecmd} onNavigate={(to) => (setViewId(to), setSelected(null), setHighlight(null))}
+              onSelect={(f) => {
+                setSelected(f)
+                if (highlight) clearLive() // the operator took over — the agent's highlight yields
+              }}
+              onWalk={setWalk}
+              onNodeMenu={onNodeMenu}
+              callout={highlight?.note ? { view: highlight.view, node: highlight.focus[0] ?? '', note: highlight.note } : null}
+              onDismissCallout={() => setHighlight((h) => (h ? { ...h, note: undefined } : h))}
+              onCodeRefClick={onCodeRefClick}
+            />
           ) : (
             <div className="pl-empty">This model has no views yet.</div>
           )}
@@ -564,7 +638,7 @@ export function App({ kit }: { kit: Kit }) {
           {v?.description && !selected && <div className="view-desc">{v.description.txt ?? v.description.md}</div>}
         </div>
         {selected && data.elements?.[selected] && (
-          <Details data={data} fqn={selected} paneOn={paneOn} onClose={() => setSelected(null)} onOpenView={(vv, f) => openView(vv, f)} onCode={(l, note, how) => void openCode(l, note, how)} onCodeRefClick={onCodeRefClick} />
+          <Details data={data} fqn={selected} paneOn={paneOn} onClose={() => setSelected(null)} onOpenView={(vv, f) => openView(vv, f)} onCode={(l, note, how) => void openCode(l, note, how)} onCodeRefClick={onCodeRefClick} onAsk={canCompose ? () => ask(selected) : undefined} />
         )}
       </main>
       {toast && (

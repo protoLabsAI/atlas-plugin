@@ -72,7 +72,7 @@ background: var(--a-raised); position: relative }
 .d-tech { margin-bottom: 6px }
 .d-summary p, .d-desc p { margin: 6px 0 }
 .d-desc { color: var(--a-muted) }
-.d-drill { margin-top: 10px }
+.d-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px }
 .d-links, .d-views { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px }
 .d-code, .d-web { display: grid; grid-template-columns: 18px 1fr; gap: 0 6px; width: 100%; text-align: left; padding: 6px 8px; border-radius: 6px;
 border: 1px solid var(--a-border); background: var(--pl-color-bg, #0a0a0c); cursor: pointer; text-decoration: none; color: inherit }
@@ -123,7 +123,18 @@ background: color-mix(in srgb, var(--a-raised) 90%, transparent); border: 1px so
 @media (max-width: 640px) {
 .details { position: absolute; inset: 0 0 0 auto; width: 100%; max-width: none; z-index: 15 }
 .search input { width: 14ch } .viewpick { max-width: 16ch } .crumb button { max-width: 14ch }
-}</style>
+}
+.callout { position: absolute; z-index: 12; max-width: min(320px, calc(100% - 16px)); padding: 8px 28px 8px 12px; font-size: 13px; line-height: 1.45;
+background: var(--a-raised); color: var(--pl-color-fg, #ededed); border: 1px solid var(--a-accent); border-radius: var(--pl-radius-md, 8px);
+box-shadow: var(--a-shadow); pointer-events: auto }
+.callout::after { content: ''; position: absolute; left: calc(var(--arrow-x) - 6px); width: 10px; height: 10px; background: var(--a-raised);
+border: 1px solid var(--a-accent); transform: rotate(45deg) }
+.callout--above::after { bottom: -6px; border-top: 0; border-left: 0 }
+.callout--below::after { top: -6px; border-bottom: 0; border-right: 0 }
+.callout__body p { margin: 0 } .callout__body p + p { margin-top: 4px }
+.callout__close { position: absolute; top: 4px; right: 4px }
+@media (prefers-reduced-motion: no-preference) { .callout { animation: atlas-callout-in var(--pl-motion-base, 200ms) var(--pl-motion-ease, ease-out) } }
+@keyframes atlas-callout-in { from { opacity: 0; transform: translateY(4px) } to { opacity: 1; transform: none } }</style>
 <script>
   // RULE 3 - slug-aware base: "" on the host window, "/agents/<slug>" through the fleet proxy.
   var BASE = location.pathname.split("/plugins/")[0];
@@ -135,7 +146,7 @@ background: color-mix(in srgb, var(--a-raised) 90%, transparent); border: 1px so
     document.head.insertBefore(l, document.head.querySelector("style"));
     // The viewer bundle, BASE-prefixed (the page URL has no trailing slash, so no relative URLs).
     var s = document.createElement("script");
-    s.type = "module"; s.src = BASE + "/plugins/atlas/static/assets/atlas-C59eGb02.js";
+    s.type = "module"; s.src = BASE + "/plugins/atlas/static/assets/atlas-DQWYLM--.js";
     s.onerror = function () {
       var b = document.getElementById("boot");
       if (b) b.textContent = "Atlas could not load its viewer bundle (" + s.src + ").";

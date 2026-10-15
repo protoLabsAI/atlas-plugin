@@ -5,9 +5,11 @@ description: >-
   Drill-down architecture diagrams you can explore and present. Atlas renders a
   project's LikeC4 model (a directory of .c4 files, default <project>/architecture/)
   as a console view: click an element to drill into it, follow code links into the
-  console's code pane, and run guided tours in presenter mode. The agent gets three
-  tools (atlas_validate, atlas_describe, atlas_show) and a skill for authoring the
-  model. Layout runs in a vendored, offline engine that needs Node.js 20 or newer —
+  console's code pane, and run guided tours in presenter mode. The agent gets four
+  tools (atlas_validate, atlas_describe, atlas_show, atlas_clear) to check the model
+  and narrate it live — show an element, highlight nodes and relationship paths, pin
+  a callout, step through flows, and see what the operator is looking at — and a
+  skill for authoring the model. Layout runs in a vendored, offline engine that needs Node.js 20 or newer —
   the one on PATH, or protoAgent's managed Node runtime (one click from the setup
   banner).
 enabled: false
@@ -43,9 +45,15 @@ views:
 public_paths:
   - "/plugins/atlas/static/"
 
-# Bus topics (ADR 0039). The open viewer subscribes to atlas.# and navigates.
+# Bus topics (ADR 0039). The open viewer subscribes to atlas.# and navigates / highlights;
+# it publishes what the operator sees (atlas.viewing), which the backend keeps for
+# atlas_describe(current=true).
 emits:
-  - atlas.show   # {view?, step?, focus?, tour?, slide?, present} — the agent asked to show a view / tour
+  - atlas.show      # {view, step?, focus?: [fqn], edges?: [edgeId], note?, tour?, slide?, present} — the agent asked to show / highlight
+  - atlas.clear     # {} — remove highlights and callouts
+  - atlas.viewing   # {view, step, selected, focus, edges, note, mode, tour, slide} — published by the viewer (debounced)
+subscribes:
+  - atlas.viewing   # the backend's "what the operator is looking at"
 
 # Declarative transparency (surfaced in the console; not enforced).
 capabilities:

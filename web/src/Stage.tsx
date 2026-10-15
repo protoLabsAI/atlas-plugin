@@ -27,6 +27,7 @@ export type StageHandle = {
   go: (view: string) => Promise<void>
   current: () => string
   diagram: () => DiagramApi | undefined
+  xyflow: () => any
   busy: () => boolean
   parentOf: (view: string) => string | null
   chain: (view: string) => string[]
@@ -245,6 +246,7 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
       },
       current: currentView,
       diagram: () => handles.current.get(st.current.active)?.diagram,
+      xyflow: () => handles.current.get(st.current.active)?.xyflow,
       busy: () => busyN.current > 0,
       parentOf,
       chain,

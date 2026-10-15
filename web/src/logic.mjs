@@ -422,8 +422,113 @@ export function parseShow(d, data, tours) {
   if (typeof d.view !== 'string' || !data.views?.[d.view]) return null
   const v = data.views[d.view]
   const step = Number.isInteger(d.step) && d.step >= 1 && d.step <= dynamicSteps(v).length ? d.step : undefined
-  const focus = typeof d.focus === 'string' && v.nodes?.some((n) => n.id === d.focus) ? d.focus : undefined
-  return { kind: 'view', view: d.view, step, focus, present }
+  const ids = new Set((v.nodes ?? []).map((n) => n.id))
+  const focus = (Array.isArray(d.focus) ? d.focus : typeof d.focus === 'string' ? [d.focus] : []).filter((f) => typeof f === 'string' && ids.has(f))
+  const eids = new Set((v.edges ?? []).map((e) => e.id))
+  const edges = (Array.isArray(d.edges) ? d.edges : []).filter((e) => typeof e === 'string' && eids.has(e))
+  const note = typeof d.note === 'string' && d.note.trim() && (focus.length || edges.length) ? d.note.trim().slice(0, 280) : undefined
+  return { kind: 'view', view: d.view, step, focus, edges, note, present }
+}
+
+// ---------------------------------------------------------------- live highlights
+
+/**
+ * What to light up in a view: the focused nodes + every edge's endpoints stay lit (and the
+ * compounds containing them, so their context reads), the rest dims; `bounds` is the box the
+ * camera fits. → {lit: Set<nodeId>, active: Set<edgeId>, dimNodes: [], dimEdges: [], bounds|null}
+ */
+export function highlightPlan(view, focus = [], edges = []) {
+  const nodes = view?.nodes ?? []
+  const byId = new Map(nodes.map((n) => [n.id, n]))
+  const allEdges = view?.edges ?? []
+  const active = new Set(edges.filter((e) => allEdges.some((x) => x.id === e)))
+  const core = new Set(focus.filter((f) => byId.has(f)))
+  for (const e of allEdges) if (active.has(e.id)) (core.add(e.source), core.add(e.target))
+  const lit = new Set(core)
+  for (const id of core) {
+    let p = byId.get(id)?.parent
+    while (p && byId.has(p)) {
+      lit.add(p)
+      p = byId.get(p)?.parent
+    }
+  }
+  let bounds = null
+  for (const id of core) {
+    const n = byId.get(id)
+    if (!n || !(n.width > 0)) continue
+    const b = { x: n.x, y: n.y, x2: n.x + n.width, y2: n.y + n.height }
+    bounds = bounds ? { x: Math.min(bounds.x, b.x), y: Math.min(bounds.y, b.y), x2: Math.max(bounds.x2, b.x2), y2: Math.max(bounds.y2, b.y2) } : b
+  }
+  return {
+    lit,
+    active,
+    dimNodes: nodes.map((n) => n.id).filter((id) => !lit.has(id)),
+    dimEdges: allEdges.map((e) => e.id).filter((id) => !active.has(id)),
+    bounds: bounds && { x: bounds.x, y: bounds.y, width: bounds.x2 - bounds.x, height: bounds.y2 - bounds.y },
+    empty: core.size === 0,
+  }
+}
+
+/**
+ * Where an on-canvas callout goes: above the node's on-screen box, centred and clamped to the
+ * canvas; below when there's no room above. `node` in flow coords, `vp` = {x, y, zoom},
+ * `canvas`/`size` = {width, height}. → {left, top, side: 'above'|'below', arrowX}
+ */
+export function calloutPlacement(node, vp, canvas, size, gap = 12, margin = 8) {
+  const sx = node.x * vp.zoom + vp.x
+  const sy = node.y * vp.zoom + vp.y
+  const sw = node.width * vp.zoom
+  const sh = node.height * vp.zoom
+  const cx = sx + sw / 2
+  let left = Math.round(cx - size.width / 2)
+  left = Math.max(margin, Math.min(left, canvas.width - size.width - margin))
+  let side = 'above'
+  let top = Math.round(sy - gap - size.height)
+  if (top < margin) {
+    side = 'below'
+    top = Math.round(Math.min(sy + sh + gap, canvas.height - size.height - margin))
+  }
+  const arrowX = Math.round(Math.max(12, Math.min(cx - left, size.width - 12)))
+  return { left, top, side, arrowX }
+}
+
+/** The `atlas.viewing` payload — what the operator sees right now. */
+export function viewingPayload({ mode, view, step, selected, highlight, tour, slide }) {
+  const out = { mode: mode === 'present' ? 'present' : 'explore', view: view ?? null, step: Number.isInteger(step) && step > 0 ? step : null, selected: selected ?? null }
+  out.focus = highlight?.focus?.length ? [...highlight.focus] : []
+  out.edges = highlight?.edges?.length ? [...highlight.edges] : []
+  out.note = highlight?.note ?? null
+  if (out.mode === 'present') ((out.tour = tour ?? null), (out.slide = Number.isInteger(slide) ? slide + 1 : null))
+  return out
+}
+
+/**
+ * "Ask about this" — the chat draft for an element (protoagent:chat:compose). Includes the
+ * element's code-link paths and, on a dynamic view, the current step.
+ */
+export function askPrompt(data, { view, fqn, step } = {}) {
+  const v = data?.views?.[view]
+  const el = fqn ? data?.elements?.[fqn] : null
+  const vt = v?.title || view || 'Atlas'
+  const title = (f) => data?.elements?.[f]?.title || f
+  let text
+  if (el) text = `In the Atlas view "${vt}", tell me about ${el.title || fqn} (${fqn}) — how it works and where it lives in the code.`
+  else text = `In the Atlas view "${vt}", walk me through what this view shows and where it lives in the code.`
+  if (v?._type === 'dynamic' && Number.isInteger(step) && step > 0) {
+    const e = dynamicSteps(v)[step - 1]
+    if (e) text += ` We're at step ${step}: ${title(e.source)} → ${title(e.target)}${e.label ? ` "${e.label}"` : ''}.`
+  }
+  const paths = el ? normaliseLinks(el.links).filter((l) => l.kind === 'code').map((l) => l.path + (l.line ? `:${l.line}` : '')) : []
+  if (paths.length) text += ` Code links: ${[...new Set(paths)].join(', ')}.`
+  return text.length > 1200 ? text.slice(0, 1199) + '…' : text
+}
+
+/** Does the host support protoagent:chat:compose? (core ≥ 0.206.0; unknown version → assume yes). */
+export function hostSupportsCompose(version) {
+  const m = /^v?(\d+)\.(\d+)\.(\d+)/.exec(String(version ?? ''))
+  if (!m) return true
+  const [a, b] = [Number(m[1]), Number(m[2])]
+  return a > 0 || b >= 206
 }
 
 // ---------------------------------------------------------------- text + theme
@@ -546,8 +651,9 @@ export function parentOriginOf({ ancestorOrigins, referrer, origin }) {
 }
 
 /** Context-menu items for a node (`protoagent:contextmenu:open`). Ids carry no dots (the host namespaces them). */
-export function nodeMenuItems({ hasCode, paneOn, canDrill, canPresent }) {
+export function nodeMenuItems({ hasCode, paneOn, canDrill, canPresent, canAsk }) {
   const items = []
+  if (canAsk) items.push({ id: 'ask', label: 'Ask about this' }, { divider: true })
   if (hasCode) {
     if (paneOn !== false) items.push({ id: 'view', label: 'View code' })
     items.push({ id: 'editor', label: 'Open in editor' })

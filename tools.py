@@ -12,6 +12,7 @@ import asyncio
 from langchain_core.tools import tool
 
 from . import lint as L
+from . import nav as N
 
 MAX_LIST = 60  # nodes / edges / findings echoed per answer
 
@@ -156,17 +157,8 @@ def describe_text(service, view: str = "") -> str:
     lines += _clip(node_lines)
     edges = v.get("edges") or []
     if kind == "dynamic":
-        lines.append("Steps:")
-        step_lines = []
-        for e in edges:
-            m = L._STEP_ID.match(str(e.get("id", "")))
-            num = str(e.get("id", ""))[5:] if m else "?"
-            step_lines.append(
-                f"  {num.lstrip('0') or num}. {e.get('source')} → {e.get('target')}: {e.get('label') or ''}".rstrip(
-                    ": "
-                )
-            )
-        lines += _clip(step_lines)
+        lines.append('Steps (atlas_show(view=..., step=n | "next" | "prev")):')
+        lines += _clip([f"  {x}" for x in N.step_lines(model, v, ids=True)])
     elif edges:
         lines.append("Edges:")
         lines += _clip(
@@ -179,17 +171,28 @@ def describe_text(service, view: str = "") -> str:
 
 
 def show_target(
-    service, *, view="", step=None, focus=None, tour=None, slide=None, present=False
+    service,
+    *,
+    view="",
+    step=None,
+    focus=None,
+    tour=None,
+    slide=None,
+    present=False,
+    element=None,
+    relations=None,
+    note=None,
+    drill=False,
+    state=None,
 ) -> tuple[dict | None, str]:
-    """Validate a show request → ``(event_payload, "")`` or ``(None, why)``."""
+    """Validate + resolve a show request → ``(event_payload, "")`` or ``(None, why)``.
+
+    ``state`` is the operator's latest ``atlas.viewing`` (for step="next" and view ties)."""
     payload, model = service.current()
     if not model:
         msg = (payload.get("errors") or [{"message": "no model"}])[0]["message"]
         return None, f"Nothing to show: {msg}"
-    view = (view or "").strip()
     tour = (tour or "").strip() or None
-    if not view and not tour:
-        return None, "Give a `view` (see atlas_describe) or a `tour`."
     event: dict = {"present": bool(present)}
     if tour:
         if tour == "auto":
@@ -197,7 +200,7 @@ def show_target(
         else:
             match = [t for t in L.tour_list(service.current_tours()) if t.get("id") == tour]
             if not match:
-                known = [t.get("id") for t in L.tour_list(service.current_tours())] or ["auto"]
+                known = [t.get("id") for t in L.tour_list(service.current_tours())] + ["auto"]
                 return None, f"Unknown tour {tour!r}. Tours: {', '.join(map(str, known))}"
             slides = match[0].get("slides") or []
         event["tour"] = tour
@@ -205,20 +208,45 @@ def show_target(
             if isinstance(slide, bool) or not isinstance(slide, int) or not 1 <= slide <= len(slides):
                 return None, f"slide {slide!r} is out of range for tour {tour} (1–{len(slides)})"
             event["slide"] = slide
-    if view:
-        problems = L.check_slide(model, {"view": view, "step": step, "focus": focus})
-        if problems:
-            return None, "Can't show that: " + "; ".join(problems)
-        event["view"] = view
-        if step is not None:
-            event["step"] = step
-        if focus:
-            event["focus"] = focus
+        if not (view or element or focus or relations or step is not None):
+            return event, ""
+    planned, why = N.plan_view_show(
+        model, state, view=view, element=element, focus=focus, relations=relations, note=note, step=step, drill=drill
+    )
+    if planned is None:
+        return None, "Can't show that: " + why
+    event.update(planned)
     return event, ""
 
 
-def build_tools(service, registry):
-    """The three agent tools, bound to the service and the registry (bus + navigation)."""
+def describe_show(event: dict, model: dict) -> str:
+    """The one-line confirmation for a show."""
+    els = L.elements(model)
+    t = lambda f: str((els.get(f) or {}).get("title") or f)  # noqa: E731
+    parts = []
+    if "tour" in event:
+        parts.append(f"tour {event['tour']}" + (f" slide {event['slide']}" if "slide" in event else ""))
+    if "view" in event:
+        v = L.views(model).get(event["view"]) or {}
+        parts.append(f"view {event['view']} ({v.get('title') or event['view']})")
+        if "step" in event:
+            sl = N.step_lines(model, v)
+            n = event["step"]
+            parts.append(
+                f"step {n} of {len(L.steps_of(v))}" + (f" — {sl[n - 1].split('. ', 1)[1]}" if 0 < n <= len(sl) else "")
+            )
+        if event.get("focus"):
+            parts.append("highlighting " + ", ".join(t(f) for f in event["focus"]))
+        if event.get("edges"):
+            parts.append(f"{len(event['edges'])} edge(s)")
+        if event.get("note"):
+            parts.append("with a callout")
+    return "Showing " + ", ".join(parts) + " in Atlas" + (" (presenter mode)." if event.get("present") else ".")
+
+
+def build_tools(service, registry, state: N.ViewerState | None = None):
+    """The agent tools, bound to the service, the registry (bus + navigation) and the viewer state."""
+    state = state or N.ViewerState()
 
     @tool
     async def atlas_validate() -> str:
@@ -230,28 +258,56 @@ def build_tools(service, registry):
         return await asyncio.to_thread(validate_report, service)
 
     @tool
-    async def atlas_describe(view: str = "") -> str:
-        """Describe the architecture diagram. With no view: the tree of views (id, title, which
-        element each drills into, kind) and the tours. With a view id: its nodes (element id,
-        title, kind, technology, drill-down view) and its edges, or numbered steps for a dynamic
-        walkthrough view. Use it to talk about the architecture or to pick what to show."""
+    async def atlas_describe(view: str = "", current: bool = False) -> str:
+        """Describe the architecture diagram. No args: the tree of views (id, title, which element
+        each drills into, kind) and the tours. view=<id>: its nodes (element id, title, kind,
+        technology, drill-down view) and edges — or, for a dynamic walkthrough, its numbered
+        steps (from → to: label). current=true: what the operator is looking at RIGHT NOW in the
+        Atlas view — the view, walkthrough step, selected element, highlights, presenter mode.
+        Check it before narrating ("the node you've selected…") and before step="next"."""
+        if current:
+            _payload, model = await asyncio.to_thread(service.current)
+            return N.describe_current(model, state)
         return await asyncio.to_thread(describe_text, service, view)
 
     @tool
     async def atlas_show(
         view: str = "",
-        step: int | None = None,
-        focus: str | None = None,
+        element: str | list[str] | None = None,
+        focus: str | list[str] | None = None,
+        relations: list[list[str]] | None = None,
+        note: str | None = None,
+        step: int | str | None = None,
+        drill: bool = False,
         tour: str | None = None,
         slide: int | None = None,
         present: bool = False,
     ) -> str:
-        """Show the operator part of the architecture diagram in the console's Atlas view.
-        view: a view id from atlas_describe. step: a 1-based step of a dynamic (walkthrough) view.
-        focus: an element id to highlight. tour: a tour id (or "auto"), slide: its 1-based slide.
-        present: true to open presenter mode (full-screen slides with speaker notes)."""
+        """Show and highlight part of the architecture diagram live in the console's Atlas view —
+        use it to narrate the architecture while the operator watches.
+        element: one element id (or a list) to show — with no view, Atlas picks the smallest view
+          containing it/them (drill=true: the element's own drill-down view instead).
+        focus: element id(s) to highlight in the view; everything else dims and the camera fits them.
+        relations: [[from, to], ...] — highlight the edges (or the shortest path) between elements.
+        note: a short callout (markdown-light, ≤ 280 chars) pinned to the first highlighted node.
+        view: a view id from atlas_describe. step: a 1-based walkthrough step of a dynamic view,
+          or "next" / "prev" relative to the operator's current step.
+        tour + slide (1-based): a presenter tour ("auto" always exists). present: open presenter mode.
+        A highlight stays until the next atlas_show / atlas_clear or the operator clicks."""
         event, why = await asyncio.to_thread(
-            show_target, service, view=view, step=step, focus=focus, tour=tour, slide=slide, present=present
+            show_target,
+            service,
+            view=view,
+            step=step,
+            focus=focus,
+            tour=tour,
+            slide=slide,
+            present=present,
+            element=element,
+            relations=relations,
+            note=note,
+            drill=drill,
+            state=state.get(),
         )
         if event is None:
             return why
@@ -259,17 +315,13 @@ def build_tools(service, registry):
         nav = getattr(registry, "navigate", None)
         if callable(nav):
             nav("atlas")
-        what = (
-            f"tour {event['tour']}" + (f" slide {event['slide']}" if "slide" in event else "")
-            if "tour" in event
-            else ""
-        )
-        if "view" in event:
-            what = (what + ", " if what else "") + f"view {event['view']}"
-            if "step" in event:
-                what += f" step {event['step']}"
-            if "focus" in event:
-                what += f" focused on {event['focus']}"
-        return f"Showing {what} in Atlas" + (" (presenter mode)." if present else ".")
+        _payload, model = service.current()
+        return describe_show(event, model or {})
 
-    return [atlas_validate, atlas_describe, atlas_show]
+    @tool
+    async def atlas_clear() -> str:
+        """Remove Atlas highlights and callouts (the view itself stays where it is)."""
+        registry.emit("atlas.clear", {})
+        return "Cleared the Atlas highlights."
+
+    return [atlas_validate, atlas_describe, atlas_show, atlas_clear]
