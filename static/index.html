@@ -135,7 +135,8 @@ border: 1px solid var(--a-accent); transform: rotate(45deg) }
 .notes.notes--out { opacity: 0 }
 @media (prefers-reduced-motion: reduce) { .notes { transition: none } }
 .details .pl-panel-header__kicker .linkish { text-transform: none; letter-spacing: 0 }
-.callout[hidden] { display: none }</style>
+.callout[hidden] { display: none }
+.notes-measure { position: absolute; inset: 0; visibility: hidden; pointer-events: none; z-index: -1 }</style>
 <script>
   // RULE 3 - slug-aware base: "" on the host window, "/agents/<slug>" through the fleet proxy.
   var BASE = location.pathname.split("/plugins/")[0];
@@ -148,7 +149,7 @@ border: 1px solid var(--a-accent); transform: rotate(45deg) }
     document.head.insertBefore(l, document.getElementById("atlas-css"));
     // The viewer bundle, BASE-prefixed (the page URL has no trailing slash, so no relative URLs).
     var s = document.createElement("script");
-    s.type = "module"; s.src = BASE + "/plugins/atlas/static/assets/atlas-KXAjFzod.js";
+    s.type = "module"; s.src = BASE + "/plugins/atlas/static/assets/atlas-C7_mIBlG.js";
     s.onerror = function () {
       var b = document.getElementById("boot");
       if (b) b.textContent = "Atlas could not load its viewer bundle (" + s.src + ").";

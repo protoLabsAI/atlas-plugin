@@ -155,3 +155,5 @@ code.coderef:hover { text-decoration-color: var(--a-accent) }
 @media (prefers-reduced-motion: reduce) { .notes { transition: none } }
 .details .pl-panel-header__kicker .linkish { text-transform: none; letter-spacing: 0 }
 .callout[hidden] { display: none }
+/* hidden clones of every caption (measured for framing) — same box as the live panel */
+.notes-measure { position: absolute; inset: 0; visibility: hidden; pointer-events: none; z-index: -1 }

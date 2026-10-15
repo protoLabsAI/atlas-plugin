@@ -14,7 +14,8 @@
 import { LikeC4ModelProvider, ReactLikeC4, type DiagramApi } from '@likec4/diagram'
 import type { LikeC4Model } from '@likec4/core/model'
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
-import { fitBox, interpolateZoom, legibleFrame, parentView, viewChain, visInit, visReduce } from './logic.mjs'
+import { frameSlide, safeRect } from './framing.mjs'
+import { fitBox, interpolateZoom, parentView, viewChain, visInit, visReduce } from './logic.mjs'
 import { FADE_MS, ZOOM_MS, easeInOutCubic, factor, patchCamera, reducedMotion } from './motion'
 
 type Box = { x: number; y: number; width: number; height: number }
@@ -39,6 +40,8 @@ export type StageHandle = {
   cropped: () => boolean
   /** show the WHOLE current view, legibility aside (presenter "Fit all") */
   fitAll: (ms?: number) => void
+  /** the subject of the next camera moves (a focus, a step's ends); null = the whole view */
+  aim: (subject: string[] | null) => void
 }
 
 type Props = {
@@ -58,8 +61,9 @@ type Props = {
   /** present / record: bigger titles + edge labels, hide text that would render illegibly, and
    *  frame the densest window when the whole view can't be shown legibly */
   legible?: boolean
-  /** keep fits clear of a bottom overlay (the presenter's notes / captions): px, or a fraction (< 1) of the stage height */
-  reserveBottom?: number
+  /** present / record: the measured top chrome + bottom caption panel (px) the framing keeps
+   *  clear of — read at the moment of each camera move (so it's the TARGET slide's caption) */
+  insets?: () => { top: number; bottom: number }
 }
 
 const PAD_DEFAULT = 56
@@ -89,7 +93,7 @@ function animate(ms: number, frame: (t: number) => void, reverse = false) {
 }
 
 export const Stage = forwardRef<StageHandle, Props>(function Stage(
-  { model, data, initialView, scheme, themeCss, tour = [], pad = PAD_DEFAULT, layerProps, onNodeClick, onNavigateTo, onCanvasClick, onNodeContextMenu, onSettled, legible, reserveBottom = 0 },
+  { model, data, initialView, scheme, themeCss, tour = [], pad = PAD_DEFAULT, layerProps, onNodeClick, onNavigateTo, onCanvasClick, onNodeContextMenu, onSettled, legible, insets: insetsFn },
   ref,
 ) {
   const views = useMemo(() => {
@@ -98,22 +102,26 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
     return m
   }, [model])
 
-  // the area fits use: the stage minus a bottom overlay (notes / captions) so no node sits under it
-  const stageSize = () => {
-    const width = stage.current?.clientWidth ?? 0
-    const H = stage.current?.clientHeight ?? 0
-    const r = reserveBottom > 0 ? (reserveBottom < 1 ? reserveBottom * H : reserveBottom) : 0
-    return { width, height: Math.max(120, H - r) }
+  // present / record framing (framing.mjs): fit the slide's subject into the SAFE RECT — the
+  // canvas minus the measured top chrome + caption panel + side margins — centred, never cutting
+  // through a node. Explore keeps the plain whole-view fit.
+  const canvasSize = () => ({ width: stage.current?.clientWidth ?? 0, height: stage.current?.clientHeight ?? 0 })
+  const fullRect = (): Box => ({ x: 0, y: 0, ...canvasSize() })
+  const insets = () => insetsFn?.() ?? { top: 0, bottom: 0 }
+  const aimRef = useRef<string[] | null>(null)
+  const ownMove = useRef(false) // our own animated moves are already framed — don't re-aim them
+  const framed = (viewId: string, key?: number, subject?: string[] | null) =>
+    frameSlide(views.get(viewId), canvasSize(), insets(), { subject: subject ?? null, kFixed: key != null ? layerScale.current.get(key)?.k : undefined }) as any
+  /** the viewport (whole canvas) a view is shown with */
+  const vpFor = (viewId: string, key?: number, subject?: string[] | null) =>
+    legible ? framed(viewId, key, subject).vp : fitBox(views.get(viewId).bounds, fullRect(), pad)
+  /** the flow box the whole canvas shows under a viewport (for the synced zoom hand-off) */
+  const canvasBox = (vp: { x: number; y: number; zoom: number }): Box => {
+    const c = canvasSize()
+    return { x: -vp.x / vp.zoom, y: -vp.y / vp.zoom, width: c.width / vp.zoom, height: c.height / vp.zoom }
   }
-  const fitRect = (): Box => ({ x: 0, y: 0, ...stageSize() })
-  /** the box to fit for a view: the whole view, or (legible) its densest legible window */
-  const frameOf = (viewId: string, key?: number): Box => {
-    const v = views.get(viewId)
-    const fixed = key != null ? layerScale.current.get(key)?.k : undefined
-    return legible ? (legibleFrame(v, stageSize(), pad, undefined, fixed) as any).box : v.bounds
-  }
-  const kOf = (viewId: string) => (legible ? (legibleFrame(views.get(viewId), stageSize(), pad) as any).k : 1)
-  const keOf = (viewId: string) => (legible ? (legibleFrame(views.get(viewId), stageSize(), pad) as any).ke : 1)
+  const kOf = (viewId: string) => (legible ? framed(viewId).k : 1)
+  const keOf = (viewId: string) => (legible ? framed(viewId).ke : 1)
   // a layer's text scale is fixed when it mounts — a later stage/caption resize re-frames the
   // camera but never resizes the text under the viewer's eyes
   const layerScale = useRef(new Map<number, { k: number; ke: number }>())
@@ -213,11 +221,11 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
       // small-text visibility: the arriving layer decides from its DESTINATION zoom from frame 1,
       // the leaving one keeps what it shows — nothing pops mid-zoom
       visRef.current(fromKey, srcView, { type: 'freeze' })
-      visRef.current(toKey, target, { type: 'target', zoom: fitBox(frameOf(target, toKey), fitRect(), pad).zoom, until: Infinity })
+      visRef.current(toKey, target, { type: 'target', zoom: vpFor(target, toKey).zoom, until: Infinity })
       elA.style.willChange = elB.style.willChange = 'opacity' // composited only while fading
 
       if (kind === 'fade') {
-        const vpB = fitBox(frameOf(target, toKey), fitRect(), pad)
+        const vpB = vpFor(target, toKey)
         await animate(still ? 160 : FADE_MS * factor(), (t) => {
           if (!still) B.xyflow.setViewport({ ...vpB, zoom: vpB.zoom * lerp(0.94, 1, t), x: lerp(W / 2 - (W / 2 - vpB.x) * 0.94, vpB.x, t), y: lerp(H / 2 - (H / 2 - vpB.y) * 0.94, vpB.y, t) })
           elA.style.opacity = String(1 - t)
@@ -229,9 +237,10 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
         const parentId = kind === 'in' ? srcView : target
         const childId = kind === 'in' ? target : srcView
         const node = views.get(parentId).nodes.find((n: any) => n.id === portal) as Box
-        const childBounds = frameOf(childId, kind === 'in' ? toKey : fromKey)
-        const vpP0 = kind === 'in' ? A.xyflow.getViewport() : fitBox(frameOf(parentId, kind === 'in' ? fromKey : toKey), fitRect(), pad)
-        const FR = fitRect()
+        // the child ends EXACTLY on its framing: fit the canvas box that framing shows
+        const childBounds = canvasBox(vpFor(childId, kind === 'in' ? toKey : fromKey))
+        const vpP0 = kind === 'in' ? A.xyflow.getViewport() : vpFor(parentId, toKey)
+        const FR = fullRect()
         const vpP1 = fitBox(node, full, Math.min(W, H) * 0.03, 12)
         const zi = interpolateZoom(1.0)(toView(vpP0, W, H), toView(vpP1, W, H))
         const frame = (t: number) => {
@@ -240,7 +249,7 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
           const nodeRect: Box = { x: node.x * vp.zoom + vp.x, y: node.y * vp.zoom + vp.y, width: node.width * vp.zoom, height: node.height * vp.zoom }
           const k = t ** 2 // hand-off from "inside the node" to "the whole stage"
           const rect: Box = { x: lerp(nodeRect.x, 0, k), y: lerp(nodeRect.y, 0, k), width: lerp(nodeRect.width, FR.width, k), height: lerp(nodeRect.height, FR.height, k) }
-          C.xyflow.setViewport(fitBox(childBounds, rect, lerp(nodeRect.width * 0.06, pad, k)))
+          C.xyflow.setViewport(fitBox(childBounds, rect, lerp(nodeRect.width * 0.06, 0, k)))
           const a = smoothstep(0.4, 0.88, t)
           P.el!.style.opacity = String(1 - a)
           C.el!.style.opacity = String(a)
@@ -261,7 +270,7 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
       ready.current.delete(fromKey)
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [views, parentOf, portalFor, pad, legible, reserveBottom],
+    [views, parentOf, portalFor, pad, legible, insetsFn],
   )
 
   const goNow = useCallback(
@@ -296,21 +305,26 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
       parentOf,
       chain,
       ready: () => firstReady.current.promise,
-      cropped: () => !!legible && !!(legibleFrame(views.get(currentView()), stageSize(), pad, undefined, layerScale.current.get(st.current.active)?.k) as any).cropped,
+      cropped: () => !!legible && !!framed(currentView(), st.current.active).cropped,
+      aim: (subject: string[] | null) => {
+        aimRef.current = subject && subject.length ? subject : null
+      },
       fitAll: (ms = 450) => {
         const h = handles.current.get(st.current.active)
         const v = views.get(currentView())
-        if (h?.xyflow && v) void h.xyflow.setViewport(fitBox(v.bounds, fitRect(), pad), ms ? { duration: ms } : undefined)
+        ownMove.current = !!ms
+        if (h?.xyflow && v) void h.xyflow.setViewport(fitBox(v.bounds, legible ? safeRect(canvasSize(), insets()) : fullRect(), legible ? 0 : pad), ms ? { duration: ms } : undefined)
       },
       frame: (ms = 450) => {
         const h = handles.current.get(st.current.active)
         if (!h?.xyflow) return
-        const vp = fitBox(frameOf(currentView(), st.current.active), fitRect(), pad)
+        const vp = vpFor(currentView(), st.current.active, aimRef.current)
+        ownMove.current = !!ms
         void h.xyflow.setViewport(vp, ms ? { duration: ms } : undefined)
       },
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [goNow, parentOf, chain, onSettled, legible, views, pad],
+    [goNow, parentOf, chain, onSettled, legible, views, pad, insetsFn],
   )
 
   // legible: per-layer small-text visibility (logic.mjs visReduce): programmatic camera moves decide
@@ -344,16 +358,21 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
   const fadeMs = reducedMotion() ? 0 : 180
   const legibleCssFor = (key: number) => {
     const v = vis[key]
-    const hide = (on: boolean) => `opacity:${on ? 0 : 1} !important;transition:opacity ${v?.fade ? fadeMs : 0}ms ease !important`
+    const ms = v?.fade ? fadeMs : 0
+    const hide = (on: boolean) => `opacity:${on ? 0 : 1} !important;transition:opacity ${ms}ms ease !important`
+    // descriptions / technology COLLAPSE when hidden (so a lone title centres in its box) and
+    // grow back with the same fade — never mid camera move (the visibility state is frozen then)
+    const collapse = (on: boolean, max: string) =>
+      `${hide(on)},max-height ${ms}ms ease !important;max-height:${on ? '0' : max} !important;${on ? 'margin-block:0 !important;padding-block:0 !important;overflow:hidden !important;' : ''}`
     return [
       legibleCss,
       // our state decides (LikeC4's own zoom-small hiding would pop on its own threshold)
-      `.likec4-element-node-data [data-likec4-node-description]{display:-webkit-box !important;${hide(!!v?.hideDesc)}}`,
-      `.likec4-element-node-data [data-likec4-node-technology]{display:block !important;${hide(!!v?.hideDesc)}}`,
+      `.likec4-element-node-data [data-likec4-node-description]{display:-webkit-box !important;${collapse(!!v?.hideDesc, '8rem')}}`,
+      `.likec4-element-node-data [data-likec4-node-technology]{display:block !important;${collapse(!!v?.hideDesc, '4em')}}`,
       `.likec4-edge-label-container{${hide(!!v?.hideEdgeLabels)}}`,
       // hidden small text comes back on the node that has keyboard focus or is selected (and the
       // node's accessible name always carries its description)
-      '.react-flow__node:focus-visible [data-likec4-node-description],.react-flow__node:focus-visible [data-likec4-node-technology],.react-flow__node.selected [data-likec4-node-description],.react-flow__node.selected [data-likec4-node-technology]{opacity:1 !important}',
+      '.react-flow__node:focus-visible [data-likec4-node-description],.react-flow__node:focus-visible [data-likec4-node-technology],.react-flow__node.selected [data-likec4-node-description],.react-flow__node.selected [data-likec4-node-technology]{opacity:1 !important;max-height:8rem !important}',
     ].join('\n')
   }
   const legibleCss = legible
@@ -365,7 +384,13 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
         '.likec4-element-node-data [data-likec4-node-description]{font-size:calc(var(--likec4-text-size) * .74 / var(--atlas-k,1)) !important}',
         '.likec4-element-node-data [data-likec4-node-technology]{font-size:calc(var(--likec4-text-size) * .635 / var(--atlas-k,1)) !important}',
         '.likec4-edge-label .likec4-edge-label__text{font-size:calc(14px * var(--atlas-ke,1)) !important;white-space:nowrap !important;overflow-wrap:normal !important}',
-        '.likec4-edge-label{max-width:none !important;width:max-content !important}',
+        // the label's wrapper caps its width (the layout's label box); with the larger text let it
+        // size to its one line instead — the chip background then matches the text exactly
+        '.likec4-edge-label-container > div{max-width:none !important}',
+        // the bigger label grows around its layout centre (not off to the right, over a node) …
+        '.likec4-edge-label{transform:translate(calc((1 / var(--atlas-ke,1) - 1) * 50%), calc((1 / var(--atlas-ke,1) - 1) * 50%)) !important}',
+        // … on an OPAQUE chip: a translucent one over a node read as a stray coloured square
+        '.likec4-edge-label-container{--xy-edge-label-background-color:var(--likec4-palette-relation-label-bg) !important}',
         '.likec4-compound-node .likec4-compound-title{font-size:calc(15px * var(--atlas-k,1)) !important}',
       ].join('\n')
     : ''
@@ -405,12 +430,29 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
               onInitialized={({ diagram, xyflow }: any) => {
                 const h = handles.current.get(l.key) ?? ({} as LayerHandle)
                 handles.current.set(l.key, { ...h, diagram, xyflow })
-                patchCamera(diagram, (zoom: number, ms: number) =>
-                  visRef.current(l.key, l.viewId, { type: 'target', zoom, until: performance.now() + ms + 80 }),
+                patchCamera(
+                  diagram,
+                  (zoom: number, ms: number) => visRef.current(l.key, l.viewId, { type: 'target', zoom, until: performance.now() + ms + 80 }),
+                  legible
+                    ? (vp: any) => {
+                        if (ownMove.current) {
+                          ownMove.current = false
+                          return vp
+                        }
+                        if (aimRef.current) return vpFor(l.viewId, l.key, aimRef.current)
+                        // no subject: keep LikeC4's choice of region, but show it inside the safe rect
+                        const c = canvasSize()
+                        const S = safeRect(c, insets())
+                        const z = vp.zoom * Math.min(S.width / c.width, S.height / c.height)
+                        const fx = (c.width / 2 - vp.x) / vp.zoom
+                        const fy = (c.height / 2 - vp.y) / vp.zoom
+                        return { x: S.x + S.width / 2 - fx * z, y: S.y + S.height / 2 - fy * z, zoom: z }
+                      }
+                    : undefined,
                 )
                 if (legible && l.key === 0) {
                   // the first layer: LikeC4 fitted the WHOLE view; frame it legibly instead
-                  const vp = fitBox(frameOf(l.viewId, l.key), fitRect(), pad)
+                  const vp = vpFor(l.viewId, l.key)
                   void xyflow.setViewport(vp)
                   visRef.current(l.key, l.viewId, { type: 'target', zoom: vp.zoom, until: 0 })
                 }

@@ -68,25 +68,42 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
   const manual = useRef(false)
   const [done, setDone] = useState(false)
   const [captionOut, setCaptionOut] = useState(false)
-  // the notes / caption panel's MEASURED footprint: framing keeps every node above it
+  // the framing's safe area: the top chrome and the caption / notes panel, MEASURED. Every slide's
+  // caption is laid out (hidden) up front, so a camera move already knows how tall the caption it
+  // is arriving at will be.
   const notesRef = useRef<HTMLElement | null>(null)
   const rootRef = useRef<HTMLDivElement | null>(null)
-  const [reserve, setReserve] = useState(record ? 0.24 : 150)
+  const measureRef = useRef<HTMLDivElement | null>(null)
+  const chrome = useRef({ top: 56, bottoms: [] as number[], live: 0 })
   useEffect(() => {
-    const el = notesRef.current
     const root = rootRef.current
-    if (!el || !root) return
-    const ro = new ResizeObserver(() => {
+    if (!root) return
+    const measure = () => {
       const r = root.getBoundingClientRect()
-      const n = el.getBoundingClientRect()
-      if (!n.height) return
-      const px = Math.ceil((r.bottom - n.top + 12) / 8) * 8 // + a gap; 8 px steps so a reflow doesn't re-frame
-      setReserve((p) => (p === px ? p : px))
-    })
-    ro.observe(el)
+      let top = 0
+      for (const el of root.querySelectorAll('.p-crumbs, .p-top')) {
+        const b = (el as HTMLElement).getBoundingClientRect()
+        if (b.height) top = Math.max(top, b.bottom - r.top)
+      }
+      chrome.current.top = Math.ceil(top + 8)
+      const clones = measureRef.current ? [...measureRef.current.querySelectorAll('.notes')] : []
+      chrome.current.bottoms = clones.map((c) => Math.ceil(r.bottom - (c as HTMLElement).getBoundingClientRect().top + 12))
+      const live = notesRef.current?.getBoundingClientRect()
+      chrome.current.live = live?.height ? Math.ceil(r.bottom - live.top + 12) : 0
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
     ro.observe(root)
+    if (notesRef.current) ro.observe(notesRef.current)
     return () => ro.disconnect()
+  }, [showNotes, tour])
+  const insets = useCallback(() => {
+    const c = chrome.current
+    const i = st.current.slide
+    const bottom = !showNotes ? 0 : Math.max(c.bottoms[i] ?? 0, adhocRef.current ? c.live : 0) || c.live
+    return { top: c.top, bottom }
   }, [showNotes])
+  const adhocRef = useRef(false)
   const [cropped, setCropped] = useState(false)
   const [noteSlide, setNoteSlide] = useState(first)
   const st = useRef({ slide, focused, walk })
@@ -104,11 +121,22 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
     setFocused(null)
   }
 
+  const lastAim = useRef<string[] | null>(null)
+  const aim = (x: string[] | null) => {
+    lastAim.current = x
+    stage.current?.aim(x)
+  }
+  /** a walkthrough step's subject: its two ends */
+  const stepEnds = (viewId: string, n: number) => {
+    const e = (data?.views?.[viewId]?.edges ?? []).find((x: any) => String(x.id).startsWith(stepId(n)))
+    return e ? [e.source, e.target] : null
+  }
   const applySlideDetail = useCallback(async (s: Slide, sameView: boolean) => {
     const d = stage.current?.diagram()
     if (!d) return
     const ctx = d.getContext() as any
     if (s.step) {
+      aim(stepEnds(s.view, s.step))
       if (ctx.activeWalkthrough && sameView) d.walkthroughStep({ step: stepId(s.step) })
       else d.startWalkthrough(stepId(s.step))
       setFocused(null)
@@ -117,6 +145,10 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
     if (ctx.activeWalkthrough) d.stopWalkthrough()
     clearHighlight(d)
     const many = Array.isArray(s.focus) ? s.focus : s.focus ? [s.focus] : []
+    // a single focus is shown with its direct neighbours (its context), when they fit legibly
+    const view = data?.views?.[s.view]
+    const ctxIds = many.length === 1 ? [many[0], ...(view?.edges ?? []).flatMap((e: any) => (e.source === many[0] ? [e.target] : e.target === many[0] ? [e.source] : []))] : many
+    aim(ctxIds.length ? [...new Set(ctxIds)] : null)
     if (many.length > 1 || s.edges?.length) {
       applyHighlight(d, stage.current?.xyflow(), data?.views?.[s.view], { view: s.view, focus: many, edges: s.edges ?? [] })
       setFocused(null)
@@ -159,6 +191,7 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
         if (i < 0 || i >= tour.length) return
         st.current = { ...st.current, slide: i }
         setSlide(i)
+        adhocRef.current = false
         setAdhoc(null)
         await showSlide(tour[i])
         if (st.current.slide === i) setNoteSlide(i) // the caption changes when the camera arrives
@@ -192,6 +225,7 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
         const s = cmd.adhoc
         await run(async () => {
           if (typeof cmd.slide === 'number') ((st.current = { ...st.current, slide: cmd.slide }), setSlide(cmd.slide))
+          adhocRef.current = true
           setAdhoc(s)
           await showSlide(s)
         })
@@ -222,6 +256,7 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
         const n = nodeOf(id)
         if (n?.navigateTo) {
           setWalkNow(0)
+          adhocRef.current = false
           setAdhoc(null)
           await goView(n.navigateTo)
           syncSlide(n.navigateTo)
@@ -248,6 +283,7 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
         }
         const p = S().parentOf(currentView())
         if (p) {
+          adhocRef.current = false
           setAdhoc(null)
           await goView(p)
           syncSlide(p, -1)
@@ -259,6 +295,7 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
   const walkTo = (n: number) => {
     const d = stage.current?.diagram()
     if (!d) return
+    aim(n ? stepEnds(currentView(), n) : null)
     if (n === 0) {
       d.stopWalkthrough()
       stage.current?.frame(450)
@@ -395,6 +432,12 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
       get speed() {
         return getSpeed()
       },
+      get aim() {
+        return lastAim.current
+      },
+      get insets() {
+        return insets()
+      },
     }
     return () => {
       delete (window as any).__present
@@ -415,7 +458,7 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
         pad={PAD}
         layerProps={LAYER_PROPS}
         legible
-        reserveBottom={showNotes ? reserve : 0}
+        insets={insets}
         onNavigateTo={(_to, el) => el && drill(el.id)}
         onNodeClick={(n) => setFocused(n.id)}
         onSettled={(v) => {
@@ -458,6 +501,16 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
       </div>
       )}
       {showNotes && (
+        <>
+        <div ref={measureRef} className="notes-measure" aria-hidden>
+          {tour.map((t, i) => (
+            <aside key={i} className="notes">
+              {!record && <div className="notes-head">.</div>}
+              {t.note ? <div className="notes-body" dangerouslySetInnerHTML={{ __html: mdLight(t.note, { codeRefs: true }) }} /> : <div className="notes-body">.</div>}
+              {!record && <div className="keys">.</div>}
+            </aside>
+          ))}
+        </div>
         <aside ref={notesRef as any} data-presenter-chrome className={`notes${captionOut ? ' notes--out' : ''}`} aria-live="polite" style={{ ['--caption-fade' as any]: `${CAPTION_FADE_MS}ms` }}>
           {!record && (
           <div className="notes-head">
@@ -477,6 +530,7 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
             </div>
           )}
         </aside>
+        </>
       )}
     </div>
   )

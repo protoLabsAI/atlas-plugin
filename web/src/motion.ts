@@ -33,7 +33,7 @@ export function onSpeed(f: (s: Speed) => void) {
 export const easeInOutCubic = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2)
 
 /** Slow + ease LikeC4's own animated camera moves (they go through xyflow's panZoom.setViewport). */
-export function patchCamera(diagram: any, onMove?: (zoom: number, ms: number) => void) {
+export function patchCamera(diagram: any, onMove?: (zoom: number, ms: number) => void, transform?: (vp: any) => any) {
   try {
     const pz = diagram?.getContext?.()?.xystore?.getState?.()?.panZoom
     if (!pz || pz.__atlas) return
@@ -41,6 +41,8 @@ export function patchCamera(diagram: any, onMove?: (zoom: number, ms: number) =>
     pz.setViewport = (vp: any, opts?: any) => {
       if (!opts?.duration) return orig(vp, opts)
       const ms = reducedMotion() ? Math.min(opts.duration, 150) : Math.round(opts.duration * CAMERA_SCALE * factor())
+      // the owner may re-aim the move (present / record: into the safe rect, at the slide's subject)
+      if (transform) vp = transform(vp) ?? vp
       // tell the owner where this animated move ENDS, before it starts (text visibility decides from it)
       if (typeof vp?.zoom === 'number') onMove?.(vp.zoom, ms)
       if (reducedMotion()) return orig(vp, { ...opts, duration: ms })

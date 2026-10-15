@@ -737,7 +737,9 @@ export function parseDeepLink(hash) {
   const q = new URLSearchParams(raw)
   const flag = (k) => ['1', 'true', 'yes', ''].includes(q.get(k) ?? 'no')
   const int = (k) => (/^\d+$/.test(q.get(k) ?? '') ? Number(q.get(k)) : undefined)
-  const out = { present: flag('present') || flag('autoplay') || flag('record'), autoplay: flag('autoplay') || flag('record'), record: flag('record') }
+  // record implies autoplay unless `autoplay=0` asks to step it by hand (framing checks)
+  const autoplay = q.has('autoplay') ? flag('autoplay') : flag('record')
+  const out = { present: flag('present') || autoplay || flag('record'), autoplay, record: flag('record') }
   if (q.get('tour')) ((out.tour = q.get('tour')), (out.slide = int('slide')))
   if (q.get('view')) ((out.view = q.get('view')), (out.step = int('step')))
   out.focus = (q.get('focus') ?? '').split(',').map((s) => s.trim()).filter(Boolean)
