@@ -9,7 +9,7 @@ import type { Highlight } from './highlight'
 import { setSpeed } from './motion'
 import { themeFor } from './theme'
 import {
-  askPrompt, codeOpenMessage, parseDeepLink, codeRoute, hostSupportsCompose, viewingPayload, displayFile, dynamicSteps, errorFileRel, keepView, keyCombo, nodeMenuItems, normaliseLinks,
+  askPrompt, CLEAR_TOPIC, codeOpenMessage, exploreShowPlan, parseDeepLink, SHOW_TOPIC, codeRoute, hostSupportsCompose, viewingPayload, displayFile, dynamicSteps, errorFileRel, keepView, keyCombo, nodeMenuItems, normaliseLinks,
   parseShow, resolveProject, scopedViewOf, searchModel, shouldForwardKey, slideForView, toursFor, viewChain, viewForElement, viewOptions,
 } from './logic.mjs'
 
@@ -203,18 +203,18 @@ export function App({ kit }: { kit: Kit }) {
   // Pane availability: GET /api/runtime/status → code_pane.enabled (null = unknown/older host).
   const [paneOn, setPaneOn] = useState<boolean | null>(null)
   // "Ask about this" → protoagent:chat:compose (core ≥ 0.206.0; unknown version → shown)
-  const [canCompose, setCanCompose] = useState(embedded)
+  const [canCompose, setCanCompose] = useState(false) // hidden until /status proves the host can
   useEffect(() => {
     const check = async () => {
       try {
         const r = await kit.apiFetch('/api/runtime/status', { cache: 'no-store' })
-        if (!r.ok) return
+        if (!r.ok) return setCanCompose(false)
         const st = await r.json()
         const v = st?.code_pane?.enabled
         setPaneOn(typeof v === 'boolean' ? v : null)
         setCanCompose(embedded && hostSupportsCompose(st?.version))
       } catch {
-        /* older host: keep unknown */
+        setCanCompose(false) // older host / no status: keep the pane unknown, compose hidden
       }
     }
     void check()
@@ -320,17 +320,10 @@ export function App({ kit }: { kit: Kit }) {
     if (mode.kind === 'present') setMode({ kind: 'explore' })
     setViewId(req.view)
     setSelected(null)
-    if (req.step) {
-      setHighlight(null)
-      command({ view: req.view, step: req.step })
-    } else if (req.focus.length || req.edges.length) {
-      const h = { view: req.view, focus: req.focus, edges: req.edges, note: req.note }
-      setHighlight(h)
-      command({ view: req.view, highlight: h })
-    } else {
-      setHighlight(null)
-      command({ view: req.view, fit: true })
-    }
+    const plan = exploreShowPlan(req) as any
+    setHighlight(plan.highlight)
+    // a step AND a highlight: walk to the step, then light the highlight + callout over it
+    command({ view: req.view, step: plan.step, highlight: plan.highlight ?? undefined, fit: plan.fit })
   }
   const clearLive = useCallback(() => {
     setHighlight((h) => {
@@ -356,8 +349,8 @@ export function App({ kit }: { kit: Kit }) {
         if (m.seq <= lastSeq) return
         lastSeq = m.seq
       }
-      if (m.topic === 'atlas.show' || String(m.topic).endsWith('.atlas.show')) showRef.current(m.data ?? {})
-      else if (m.topic === 'atlas.clear' || String(m.topic).endsWith('.atlas.clear')) clearRef.current()
+      if (m.topic === SHOW_TOPIC) showRef.current(m.data ?? {})
+      else if (m.topic === CLEAR_TOPIC) clearRef.current()
     }
     window.addEventListener('message', onMsg)
     subscribeBus()
@@ -447,12 +440,30 @@ export function App({ kit }: { kit: Kit }) {
     [data, mode, presenting, viewId, walk, selected, highlight],
   )
   const viewingKey = JSON.stringify(viewing)
+  const instance = useMemo(() => Math.random().toString(36).slice(2, 10), [])
+  const sendViewing = useCallback(
+    (extra: Record<string, unknown> = {}) => viewing && post({ type: 'protoagent:publish', topic: 'atlas.viewing', data: { ...viewing, instance, ...extra } }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [viewingKey, instance],
+  )
   useEffect(() => {
     if (!viewing) return
-    const t = window.setTimeout(() => post({ type: 'protoagent:publish', topic: 'atlas.viewing', data: viewing }), 400)
+    const t = window.setTimeout(() => sendViewing(), 400)
     return () => window.clearTimeout(t)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewingKey])
+  }, [sendViewing, viewing])
+  // heartbeat while visible (the backend marks a view stale after ~90 s of silence) + hidden / closed
+  useEffect(() => {
+    const beat = window.setInterval(() => document.visibilityState === 'visible' && sendViewing(), 30_000)
+    const onVis = () => sendViewing(document.visibilityState === 'visible' ? {} : { hidden: true })
+    const onHide = () => sendViewing({ closed: true })
+    document.addEventListener('visibilitychange', onVis)
+    window.addEventListener('pagehide', onHide)
+    return () => {
+      window.clearInterval(beat)
+      document.removeEventListener('visibilitychange', onVis)
+      window.removeEventListener('pagehide', onHide)
+    }
+  }, [sendViewing])
 
   // ---- keyboard (explore): "/" search, "p" present
   useEffect(() => {

@@ -86,6 +86,18 @@ function ExplorerImpl({ model, data, viewId, scheme, themeCss, cmd, onNavigate, 
         applyHighlight(d, s.xyflow(), data?.views?.[cmd.view], cmd.highlight)
         return
       }
+      if (cmd.highlight && typeof st === 'number') {
+        // walk to the step first; light the highlight over it once the walkthrough camera settles
+        const id = stepId(st)
+        if (ctx.activeWalkthrough) d.walkthroughStep({ step: id })
+        else d.startWalkthrough(id)
+        setTimeout(() => {
+          if (!live) return
+          applyHighlight(d, s.xyflow(), data?.views?.[cmd.view], cmd.highlight!, { keepWalkthrough: true, fit: false })
+          onWalk(st)
+        }, 900)
+        return
+      }
       if (st === 'stop') {
         d.stopWalkthrough()
         d.fitDiagram(450)

@@ -142,9 +142,10 @@ export function cleanTours(tours, data) {
 /** API tours (validated) or the auto-tour, always ≥ 1 tour when the model has views. */
 export function toursFor(apiTours, data) {
   const list = cleanTours(apiTours, data)
-  if (list.length) return list
+  // the auto tour is ALWAYS there (atlas_show / atlas_record_script accept tour="auto")
   const auto = autoTour(data)
-  return auto.length ? [{ id: 'auto', title: 'Overview', slides: auto, auto: true }] : []
+  if (auto.length && !list.some((t) => t.id === 'auto')) list.push({ id: 'auto', title: 'Overview', slides: auto, auto: true })
+  return list
 }
 
 // ---------------------------------------------------------------- links
@@ -523,10 +524,11 @@ export function askPrompt(data, { view, fqn, step } = {}) {
   return text.length > 1200 ? text.slice(0, 1199) + '…' : text
 }
 
-/** Does the host support protoagent:chat:compose? (core ≥ 0.206.0; unknown version → assume yes). */
+/** Does the host support protoagent:chat:compose? Only when its version is KNOWN to be ≥ 0.206.0
+ *  (the first release that can carry core #4243) — an unknown / unparseable version hides it. */
 export function hostSupportsCompose(version) {
   const m = /^v?(\d+)\.(\d+)\.(\d+)/.exec(String(version ?? ''))
-  if (!m) return true
+  if (!m) return false
   const [a, b] = [Number(m[1]), Number(m[2])]
   return a > 0 || b >= 206
 }
@@ -713,4 +715,18 @@ export function parseDeepLink(hash) {
   if (q.get('view')) ((out.view = q.get('view')), (out.step = int('step')))
   out.focus = (q.get('focus') ?? '').split(',').map((s) => s.trim()).filter(Boolean)
   return out
+}
+
+/** The bus topics the viewer acts on — exactly these (registry.emit namespaces a plugin's emits
+ *  to `<plugin>.<event>`; any other plugin's `x.atlas.show` is ignored). */
+export const SHOW_TOPIC = 'atlas.show'
+export const CLEAR_TOPIC = 'atlas.clear'
+
+/** Explore-mode actions for a parsed `atlas.show` view request: the step to walk to (if any) and
+ *  the highlight/callout to apply — AFTER the step settles when both are given. */
+export function exploreShowPlan(req) {
+  const hasHl = (req?.focus?.length ?? 0) > 0 || (req?.edges?.length ?? 0) > 0
+  const highlight = hasHl ? { view: req.view, focus: [...req.focus], edges: [...req.edges], note: req.note } : null
+  if (req?.step) return { step: req.step, highlight, fit: false }
+  return { step: undefined, highlight, fit: !highlight }
 }

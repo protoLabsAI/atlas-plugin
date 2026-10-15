@@ -6,12 +6,12 @@ import { highlightPlan } from './logic.mjs'
 
 export type Highlight = { view: string; focus: string[]; edges: string[]; note?: string }
 
-export function applyHighlight(diagram: DiagramApi, xyflow: any, view: any, h: Highlight) {
+export function applyHighlight(diagram: DiagramApi, xyflow: any, view: any, h: Highlight, opts: { keepWalkthrough?: boolean; fit?: boolean } = {}) {
   const p = highlightPlan(view, h.focus, h.edges) as any
   if (p.empty) return false
   try {
     const ctx = diagram.getContext() as any
-    if (ctx.activeWalkthrough) diagram.stopWalkthrough()
+    if (ctx.activeWalkthrough && !opts.keepWalkthrough) diagram.stopWalkthrough()
     if (ctx.focusedNode) diagram.send({ type: 'key.esc' } as any)
     for (const id of p.lit) diagram.updateNodeData(id, { dimmed: false } as any)
     for (const id of p.dimNodes) diagram.updateNodeData(id, { dimmed: true } as any)
@@ -20,7 +20,7 @@ export function applyHighlight(diagram: DiagramApi, xyflow: any, view: any, h: H
   } catch (e) {
     console.warn('[atlas] highlight', e)
   }
-  if (p.bounds && xyflow?.fitBounds) {
+  if (opts.fit !== false && p.bounds && xyflow?.fitBounds) {
     // 640 ms through the patched camera (× CAMERA_SCALE × speed) ≈ the shared zoom duration
     void xyflow.fitBounds(p.bounds, { padding: 0.25, duration: 640 })
   }

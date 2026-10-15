@@ -60,7 +60,7 @@ test('toursFor: API tours (doc or list) validated, else auto', () => {
   const doc = { tours: [{ id: 'o', title: 'Overview', slides: [{ view: 'index', focus: 'app', note: 'hi' }, { view: 'nope' }, { view: 'turn', step: 2 }, { view: 'turn', step: 9 }] }] }
   assert.equal(tourArray(doc).length, 1)
   const t = toursFor(doc, data)
-  assert.equal(t.length, 1)
+  assert.deepEqual(t.map((x) => x.id), ['o', 'auto'], 'the auto tour always follows')
   assert.deepEqual(t[0].slides.map((s) => [s.view, s.step, s.focus]), [['index', undefined, 'app'], ['turn', 2, undefined], ['turn', undefined, undefined]])
   assert.equal(toursFor(doc.tours, data)[0].id, 'o')
   const auto = toursFor(null, data)

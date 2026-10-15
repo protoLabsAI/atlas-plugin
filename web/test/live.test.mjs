@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { highlightPlan, calloutPlacement, viewingPayload, askPrompt, hostSupportsCompose } from '../src/logic.mjs'
+import { highlightPlan, calloutPlacement, viewingPayload, askPrompt, hostSupportsCompose, exploreShowPlan, toursFor, SHOW_TOPIC, CLEAR_TOPIC } from '../src/logic.mjs'
 
 const n = (id, x, y, parent = null) => ({ id, x, y, width: 100, height: 50, parent })
 const view = {
@@ -54,5 +54,24 @@ test('hostSupportsCompose', () => {
   assert.equal(hostSupportsCompose('0.205.0'), false)
   assert.equal(hostSupportsCompose('0.206.0'), true)
   assert.equal(hostSupportsCompose('1.0.0'), true)
-  assert.equal(hostSupportsCompose(undefined), true)
+  assert.equal(hostSupportsCompose(undefined), false, 'unknown version → hidden')
+  assert.equal(hostSupportsCompose('dev'), false)
+})
+
+test('exploreShowPlan: a step AND a highlight/callout — the highlight is kept for after the step', () => {
+  const both = exploreShowPlan({ view: 'turn', step: 2, focus: ['app.api'], edges: [], note: 'Here.' })
+  assert.deepEqual(both, { step: 2, highlight: { view: 'turn', focus: ['app.api'], edges: [], note: 'Here.' }, fit: false })
+  assert.deepEqual(exploreShowPlan({ view: 'turn', step: 3, focus: [], edges: [] }), { step: 3, highlight: null, fit: false })
+  assert.deepEqual(exploreShowPlan({ view: 'index', focus: [], edges: [] }), { step: undefined, highlight: null, fit: true })
+  assert.equal(exploreShowPlan({ view: 'index', focus: ['a'], edges: [] }).fit, false)
+})
+
+test('exact bus topics', () => {
+  assert.equal(SHOW_TOPIC, 'atlas.show')
+  assert.equal(CLEAR_TOPIC, 'atlas.clear')
+})
+
+test('toursFor always offers the auto tour, even next to file tours', () => {
+  const ids = toursFor({ tours: [{ id: 'mine', slides: [{ view: 'inside' }] }] }, { elements: {}, views: { index: { id: 'index', _type: 'element', nodes: [] }, inside: view } }).map((t) => t.id)
+  assert.deepEqual(ids, ['mine', 'auto'])
 })
