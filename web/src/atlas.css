@@ -44,7 +44,7 @@ code { font-family: var(--pl-font-mono, ui-monospace, monospace); font-size: .92
 .h-title { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 .h-sub { color: var(--a-muted); font-size: 11px; margin-left: auto; white-space: nowrap }
 .nohit { padding: 6px 8px }
-.bar .pl-btn, .canvas-tools .pl-btn { height: 28px }
+.bar .pl-btn, .canvas-tools .pl-btn { height: 28px; white-space: nowrap; flex: 0 0 auto }
 .canvas-tools .pl-btn { background: var(--a-raised) }
 .linkish { background: none; border: 0; padding: 0; color: var(--a-accent); cursor: pointer; text-align: left }
 .linkish:hover { text-decoration: underline }
