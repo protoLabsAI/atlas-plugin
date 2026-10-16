@@ -176,6 +176,8 @@ which writes a shot script in Campaign Studio's YAML format. The script opens th
 content area, opens *Tour options* ▸ **Record — ‹tour title›**, marks `start`, waits for
 `tour-done`, and marks `end`. The footage between the marks is one continuous take — no cuts.
 The tool also returns the expected duration, from the same timing model the viewer runs.
+The script records the console the agent runs in — the URL it is served on — and never guesses a
+port; if the agent can't tell its own URL, the tool asks for `base_url` instead.
 
 Atlas's text sizes are tuned for crisp 2K frames: the framing and legibility checks run at a
 1280×720 viewport with device scale 2 (2560×1440). The shot script sets the viewport

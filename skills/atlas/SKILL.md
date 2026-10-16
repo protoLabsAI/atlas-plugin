@@ -366,8 +366,9 @@ Ids are element fqns (`atlas_describe`); a unique title also works, and a miss s
 
 ## 9c. Recording a walkthrough
 
-To record a tour (for a launch video or the docs), call `atlas_record_script(tour="overview",
-base_url="http://localhost:7870")`. It returns a shot script (YAML) and the expected duration; hand
+To record a tour (for a launch video or the docs), call `atlas_record_script(tour="overview")`
+and leave `base_url` blank — it records the console you run in (never guess a port: another agent's
+console may be on it). It returns a shot script (YAML) and the expected duration; hand
 the YAML to the recorder (Campaign Studio's `shotscript`) unchanged. Before you record:
 
 - Run `atlas_validate`. The script refuses a tour with broken slides.

@@ -2,7 +2,20 @@
 
 All notable changes to Atlas. Versions follow `version` in `protoagent.plugin.yaml`.
 
-## [0.2.0] — unreleased
+## [0.2.1]
+
+### Fixed
+
+- **`atlas_record_script` records the agent's OWN console** ([#7](https://github.com/protoLabsAI/atlas-plugin/issues/7)).
+  A blank `base_url` used to fall back to `http://localhost:7870`, protoAgent's default port, so on a
+  machine running several agents it could record a different (live) console. It now uses the URL
+  this agent is served on — a core `public_base_url` seam when the host has one
+  ([protoAgent#4256](https://github.com/protoLabsAI/protoAgent/issues/4256)), else the A2A card's rule:
+  `A2A_PUBLIC_URL`, else the port the running server bound — and refuses when that can't be known
+  (`base_url is required: pass the URL this agent's console is served on`). A `base_url` that isn't
+  this agent's own console gets a warning in the result. The docs no longer show a `:7870` example.
+
+## [0.2.0]
 
 Live agent navigation, recording mode, 2K legibility and framing, and design-system adoption
 ([#1](https://github.com/protoLabsAI/atlas-plugin/pull/1), [#2](https://github.com/protoLabsAI/atlas-plugin/pull/2),

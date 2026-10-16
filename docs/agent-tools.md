@@ -177,18 +177,18 @@ continuous take in record mode, and predicts its length.
 | Parameter | Meaning |
 |---|---|
 | `tour` | A tour id; `"auto"` always exists. Every slide must pass the tour checks. |
-| `base_url` | The console's URL, `http(s)://host[:port][/path]`. Default `http://localhost:7870`. |
+| `base_url` | Leave it blank: the script records **this agent's own console**, at the URL it is served on (`A2A_PUBLIC_URL` if set, else the port the running server bound — the same address its A2A card advertises). If that can't be known, the tool refuses instead of guessing. Pass `http(s)://host[:port][/path]` only to record a different console on purpose; the result then starts with a warning. |
 | `color_scheme` | `dark` or `light`. |
 | `viewport` | `WIDTHxHEIGHT` (3–4 digits each). |
 | `bearer_env` | The **name** of an environment variable holding the console token (`[A-Z_][A-Z0-9_]*`), when the console needs one. It adds `auth: {bearer_env: …}`. Alternatively give the recorder an `auth: {storage_state: …}` holding `protoagent.authToken` in localStorage. |
 
-Returns `Shot script for tour overview — about 85 s of footage between mark start and mark end:`
+Returns `Shot script for tour overview (console http://127.0.0.1:7953) — about 85 s of footage between mark start and mark end:`
 and the YAML in a fenced block — hand it to the recorder unchanged:
 
 ```yaml
 name: "atlas-overview"
 description: "Atlas walkthrough — protoAgent in 85 seconds (8 slides, ~85 s), recorded continuously in record mode."
-base_url: "http://localhost:7870"
+base_url: "http://127.0.0.1:7953"
 viewport: {width: 1280, height: 800}
 color_scheme: dark
 cursor: false
@@ -219,7 +219,8 @@ The duration comes from the same timing model the viewer runs (`record.py`, mirr
 long tour gets intermediate waits on `data-atlas-slide`; a single slide longer than 160 s is
 refused (`Shorten its hold_ms / split the flow into several slides`). Other refusals: an unknown
 tour, a tour with no or broken slides (`— fix it (atlas_validate) before recording`), or a bad
-`viewport` / `color_scheme` / `base_url` / `bearer_env`.
+`viewport` / `color_scheme` / `base_url` / `bearer_env`, and a blank `base_url` when the agent can't
+tell its own console's URL (`base_url is required: pass the URL this agent's console is served on`).
 
 ## Narration loops
 
