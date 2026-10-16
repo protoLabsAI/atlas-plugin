@@ -1,6 +1,6 @@
 id: atlas
 name: Atlas
-version: 0.2.2
+version: 0.2.3
 description: >-
   Drill-down architecture diagrams you can explore and present. Atlas renders a
   project's LikeC4 model (a directory of .c4 files, default <project>/architecture/)
@@ -38,7 +38,10 @@ settings:
 # Console view (ADR 0026). The page is PUBLIC (an iframe navigation carries no bearer);
 # the model and status are GATED under /api/plugins/atlas.
 views:
-  - { id: atlas, label: "Atlas", icon: Map, path: /plugins/atlas/view }
+  # placement: right — Atlas opens in the console's RIGHT sidebar, so chat stays open on the left
+  # while the agent drives the diagram (atlas_show). An operator can drag the icon to the left rail;
+  # the console keeps that (its persisted rail layout wins over the manifest once Atlas is placed).
+  - { id: atlas, label: "Atlas", icon: Map, path: /plugins/atlas/view, placement: right }
 
 # The built viewer's JS/CSS. A <script>/<link> load carries no Authorization header any
 # more than the iframe navigation does, so on a token-gated host these must be exempt.

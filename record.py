@@ -272,11 +272,19 @@ def timeline(
 # when it holds nothing. Scripts can't branch, so each collapse clicks the LAST of
 # `body, <the open toggle>` in document order: the toggle when that dock is open, else <body>
 # (a click on the Atlas canvas, which only clears a selection). Then it waits until it's closed.
-DOCKS = ("Toggle side panel", "Toggle bottom panel")
+# Atlas fills the content area by collapsing the dock it is NOT in: it opens in the right sidebar
+# (manifest `placement: right`), so the LEFT dock (chat) goes; an install whose operator keeps Atlas
+# on the left rail collapses the right sidebar instead. `:has()` picks the case — no branching.
+ATLAS_IN_RIGHT = '.pl-appshell__col--right iframe[src*="/plugins/atlas/view"]'
+DOCKS = (
+    ("Toggle left panel", f"body:has({ATLAS_IN_RIGHT})"),
+    ("Toggle side panel", f"body:not(:has({ATLAS_IN_RIGHT}))"),
+    ("Toggle bottom panel", ""),
+)
 
 
-def _collapse(label: str) -> list[str]:
-    open_toggle = f'button[aria-label="{label}"][aria-pressed="true"]:not([disabled])'
+def _collapse(label: str, when: str = "") -> list[str]:
+    open_toggle = f'{when + " " if when else ""}button[aria-label="{label}"][aria-pressed="true"]:not([disabled])'
     return [
         f"  - click: {{selector: {_yaml_str('body, ' + open_toggle)}, nth: last}}",
         f"  - wait_for: {{selector: {_yaml_str(open_toggle)}, state: hidden}}",
@@ -357,7 +365,7 @@ def shot_script(
         "  - click: {role: button, name: Atlas}",
         f"  - wait_for: {{selector: '[data-atlas-state=ready]', frame: {f}, timeout_ms: 60000}}",
         # give Atlas the whole content area: collapse the console's side + bottom docks when open
-        *[ln for dock in DOCKS for ln in _collapse(dock)],
+        *[ln for label, when in DOCKS for ln in _collapse(label, when)],
         "  - hold: 1000",
         f"  - click: {{role: button, name: Tour options, frame: {f}}}",
         f"  - click: {{role: menuitem, name: {_yaml_str('Record — ' + title)}, exact: true, frame: {f}}}",

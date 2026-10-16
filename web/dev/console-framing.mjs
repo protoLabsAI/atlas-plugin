@@ -39,8 +39,11 @@ for (let i = 0; i < 200 && !frame; i++) {
   if (!frame) await page.waitForTimeout(100)
 }
 await frame.waitForSelector('[data-atlas-state=ready]', { timeout: 60000 })
-for (const name of ['Toggle side panel', 'Toggle bottom panel']) {
-  const b = page.locator(`button[aria-label="${name}"][aria-pressed="true"]:not([disabled])`)
+// as record.py's shot script does: collapse the dock Atlas is NOT in (it opens in the right
+// sidebar → the left dock goes; kept on the left rail → the right sidebar goes), then the bottom
+const ATLAS_IN_RIGHT = '.pl-appshell__col--right iframe[src*="/plugins/atlas/view"]'
+for (const [name, when] of [['Toggle left panel', `body:has(${ATLAS_IN_RIGHT}) `], ['Toggle side panel', `body:not(:has(${ATLAS_IN_RIGHT})) `], ['Toggle bottom panel', '']]) {
+  const b = page.locator(`${when}button[aria-label="${name}"][aria-pressed="true"]:not([disabled])`)
   if (await b.count()) await b.last().click()
 }
 await page.waitForTimeout(1000)

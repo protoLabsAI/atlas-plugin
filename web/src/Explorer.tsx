@@ -173,7 +173,21 @@ function Callout({ stage, node, note, onDismiss, onCodeRefClick }: { stage: Reac
       if (!s || !el || !host || s.busy()) return true
       const vp = s.xyflow()?.getViewport?.()
       if (!vp) return true
-      const p = calloutPlacement(node, vp, { width: host.clientWidth, height: host.clientHeight }, { width: el.offsetWidth, height: el.scrollHeight }) as any
+      // the other lit (highlighted) nodes — kept clear of the callout where there's any room
+      const xyn = ((s.diagram()?.getContext() as any)?.xynodes ?? []) as any[]
+      const anyDim = xyn.some((n) => n.data?.dimmed)
+      const litIds = new Set(xyn.filter((n) => n.id !== node.id && !n.data?.dimmed).map((n) => n.id))
+      // their boxes from the DOM (screen → flow under the current camera; compound children's
+      // positions are parent-relative in the store)
+      const hr = host.getBoundingClientRect()
+      const sr = host.querySelector('.layer[data-active] .likec4-view')?.shadowRoot ?? host.querySelector('.likec4-view')?.shadowRoot
+      const lit = [...(sr?.querySelectorAll<HTMLElement>('.react-flow__node') ?? [])]
+        .filter((el) => litIds.has(el.dataset.id ?? '') && !el.querySelector('.likec4-compound-node'))
+        .map((el) => {
+          const r = el.getBoundingClientRect()
+          return { x: (r.left - hr.left - vp.x) / vp.zoom, y: (r.top - hr.top - vp.y) / vp.zoom, width: r.width / vp.zoom, height: r.height / vp.zoom }
+        })
+      const p = calloutPlacement(node, vp, { width: host.clientWidth, height: host.clientHeight }, { width: el.offsetWidth, height: el.scrollHeight }, 12, 8, anyDim ? lit : []) as any
       const key = JSON.stringify(p)
       if (key === last) return false
       last = key

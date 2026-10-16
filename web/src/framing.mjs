@@ -201,7 +201,9 @@ export function frameSlide(view, canvas, insets = {}, { subject = null, named = 
   }
   while (result.partial.length && (cropped || subjectFrame)) {
     const hi = fitZoom(B, S0)
-    const found = searchZoom(Math.min(hi, zMin), Math.max(hi, zMin))
+    // never closer than the subject's own fit: a subject that only fits below the title floor is
+    // shown whole (small) rather than cut (a narrow panel, a step whose ends are far apart)
+    const found = hi < zMin ? searchZoom(hi, hi / 2) : searchZoom(Math.min(hi, zMin), Math.max(hi, zMin))
     if (found) {
       result = found
       break

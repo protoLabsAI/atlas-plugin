@@ -180,11 +180,16 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
     const R = { x: (S.x - vp.x) / vp.zoom, y: (S.y - vp.y) / vp.zoom, x2: (S.x + S.width - vp.x) / vp.zoom, y2: (S.y + S.height - vp.y) / vp.zoom }
     // screen rect now → flow box (the current viewport)
     const flow = (r: DOMRect) => ({ x: (r.left - st0.left - cur.x) / cur.zoom, y: (r.top - st0.top - cur.y) / cur.zoom, x2: (r.right - st0.left - cur.x) / cur.zoom, y2: (r.bottom - st0.top - cur.y) / cur.zoom })
-    const whole = (b: any) => b.x >= R.x - 0.5 && b.y >= R.y - 0.5 && b.x2 <= R.x2 + 0.5 && b.y2 <= R.y2 + 0.5
+    // (a 1.5 SCREEN-px tolerance: the framing fits a subject flush to the safe rect, and a DOM box
+    // rounds by a fraction of a pixel — in flow units that is 1.5 / zoom)
+    const tol = 1.5 / Math.max(1e-6, vp.zoom)
+    const whole = (b: any) => b.x >= R.x - tol && b.y >= R.y - tol && b.x2 <= R.x2 + tol && b.y2 <= R.y2 + tol
     const mark = (el: Element, out: boolean) => (out ? el.setAttribute('data-atlas-out', '') : el.removeAttribute('data-atlas-out'))
-    for (const el of sr.querySelectorAll('.react-flow__node')) {
+    // the slide's subject is fitted, never hidden — whatever a measurement says
+    const subject = new Set(aimRef.current ?? [])
+    for (const el of sr.querySelectorAll<HTMLElement>('.react-flow__node')) {
       const r = el.getBoundingClientRect()
-      if (r.width > 0) mark(el, !whole(flow(r)))
+      if (r.width > 0) mark(el, !subject.has(el.dataset.id ?? '') && !whole(flow(r)))
     }
     const edgeOut = new Map<string, boolean>()
     for (const el of sr.querySelectorAll<SVGGraphicsElement>('.react-flow__edge')) {

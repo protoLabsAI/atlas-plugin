@@ -118,11 +118,23 @@ code.coderef:hover { text-decoration-color: var(--a-accent) }
 .notes-head { font-size: var(--pl-font-size-2xs); text-transform: uppercase; letter-spacing: .06em; color: var(--a-muted) }
 .notes-body { font-size: var(--pl-font-size-lg); margin: 4px 0 6px } .notes-body p { margin: 4px 0 }
 .notes .keys { font-size: var(--pl-font-size-2xs); color: var(--a-muted); opacity: .8 }
+/* a narrow panel (the console's right dock is 360 px by default): the inspector floats OVER the
+   canvas instead of squeezing it, and the toolbar sheds the breadcrumb (the view picker names the
+   view) before anything wraps */
 @media (max-width: 640px) {
-  .details { flex: 0 0 340px; max-width: 45%; overflow: auto; border-left: var(--pl-border-width) solid var(--a-border);
-  background: var(--a-raised); position: relative }
-.d-body { padding: var(--pl-space-2) var(--pl-space-4) var(--pl-space-5) }
+  .details { position: absolute; top: 0; right: 0; bottom: 0; z-index: 25; width: min(340px, 92%); max-width: none;
+    box-shadow: var(--a-shadow) }
   .search input { width: 14ch } .viewpick { max-width: 16ch } .crumb button { max-width: 14ch }
+  .hits { width: min(340px, calc(100vw - 16px)) }
+}
+@media (max-width: 520px) {
+  .bar { gap: 6px; padding: 6px 8px }
+  .crumbs { display: none }
+  .viewpick { flex: 1 1 auto; max-width: none; min-width: 8ch }
+  .search { flex: 0 1 13ch; min-width: 7ch; width: auto }
+  .search input { width: 100%; min-width: 0 }
+  .present-group { flex: 0 0 auto }
+  .view-desc { display: none }
 }
 
 /* live-navigation callout (atlas_show note) — tokens only */
@@ -135,6 +147,7 @@ code.coderef:hover { text-decoration-color: var(--a-accent) }
   border: 1px solid var(--a-accent); transform: rotate(45deg) }
 .callout--above::after { bottom: -6px; border-top: 0; border-left: 0 }
 .callout--below::after { top: -6px; border-bottom: 0; border-right: 0 }
+.callout--edge::after { display: none }
 .callout__body p { margin: 0 } .callout__body p + p { margin-top: 4px }
 .callout__close { position: absolute; top: 4px; right: 4px }
 @media (prefers-reduced-motion: no-preference) { .callout { animation: atlas-callout-in var(--pl-motion-base) var(--pl-motion-ease) } }

@@ -2,6 +2,26 @@
 
 All notable changes to Atlas. Versions follow `version` in `protoagent.plugin.yaml`.
 
+## [0.2.3]
+
+### Changed
+
+- **Atlas opens in the right sidebar** (`placement: right`), so chat stays open on the left while
+  the agent drives the diagram with `atlas_show`. An operator can drag the icon to the left rail,
+  and the console keeps that; an existing install keeps the rail it already has.
+- **Narrow panels** (the right sidebar is 360 px by default): the inspector floats over the canvas
+  instead of squeezing it; the toolbar drops the breadcrumb and keeps **Present** whole; a highlight's
+  callout moves off the other highlighted nodes (below its anchor, else the canvas's top or bottom
+  edge).
+- **Recording** collapses the dock Atlas is *not* in (the left one when Atlas is in the right
+  sidebar), so the take still fills the content area.
+
+### Fixed
+
+- In a narrow panel a walkthrough step's subject could be hidden by the at-rest cull when the
+  framing fit it flush to the safe area. The cull now uses a screen-pixel tolerance and never hides
+  the slide's subject; the framing never zooms past the subject's own fit to make it legible.
+
 ## [0.2.2]
 
 ### Changed
