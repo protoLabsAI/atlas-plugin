@@ -132,7 +132,7 @@ async def test_atlas_show_emits_and_navigates(stub, registry):
     tools = {t.name: t for t in build_tools(stub, registry)}
     out = await tools["atlas_show"].ainvoke({"view": "flow", "step": 1, "present": True})
     assert out == "Showing view flow (Flow), step 1 of 2 — A → D: ask in Atlas (presenter mode)."
-    assert registry.emitted == [("atlas.show", {"view": "flow", "step": 1, "present": True})]
+    assert registry.emitted == [("atlas.show", {"view": "flow", "step": 1, "present": True, "show_seq": 1})]
     assert registry.navigations == ["atlas"]
     bad = await tools["atlas_show"].ainvoke({"view": "nope"})
     assert "unknown view" in bad and len(registry.emitted) == 1

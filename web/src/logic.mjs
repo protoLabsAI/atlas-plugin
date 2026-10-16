@@ -947,3 +947,23 @@ export function presenterOwns(key, owner) {
   if (owner === 'control') return key === 'Escape'
   return true
 }
+
+// ---------------------------------------------------------------- show replay (#11)
+
+/** How fresh the backend's last show / clear must be for a view that mounts after it. */
+export const SHOW_REPLAY_MS = 15000
+
+/** On mount: what to do with `GET /api/plugins/atlas/last-show`'s `last` — 'show' | 'clear' | null.
+ * Only a request this view hasn't applied (its seq is newer) and that's still fresh. */
+export function replayAction(last, appliedSeq = 0) {
+  if (!last || typeof last.seq !== 'number' || last.seq <= appliedSeq) return null
+  const fresh = Number.isFinite(last.fresh_ms) && last.fresh_ms > 0 ? Math.min(last.fresh_ms, 60000) : SHOW_REPLAY_MS
+  if (!(typeof last.age_ms === 'number' && last.age_ms >= 0 && last.age_ms <= fresh)) return null
+  return last.kind === 'show' || last.kind === 'clear' ? last.kind : null
+}
+
+/** On the bus: a show / clear already applied (by the replay, or a duplicate frame) by its seq. */
+export function alreadyApplied(data, appliedSeq = 0) {
+  const s = data?.show_seq
+  return typeof s === 'number' && s <= appliedSeq
+}

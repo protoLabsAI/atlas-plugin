@@ -123,7 +123,7 @@ def _etag_matches(header: str | None, h: str) -> bool:
     return False
 
 
-def build_data_router(service):
+def build_data_router(service, last=None):
     """The GATED router — mount under ``/api/plugins/atlas`` (the host's operator-bearer gate)."""
     from fastapi import APIRouter
     from fastapi.responses import JSONResponse, Response
@@ -138,6 +138,11 @@ def build_data_router(service):
         if _etag_matches(request.headers.get("if-none-match"), payload["hash"]):
             return Response(status_code=304, headers=headers)
         return JSONResponse(payload, headers=headers)
+
+    @router.get("/last-show")
+    async def _last_show():
+        # the latest atlas.show / atlas.clear (in memory), for a view that mounts just after it
+        return JSONResponse({"last": last.get() if last is not None else None}, headers={"Cache-Control": "no-store"})
 
     @router.get("/status")
     async def _status():
