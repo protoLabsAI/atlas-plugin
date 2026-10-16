@@ -47,10 +47,10 @@ def test_dwell_numbers_match_the_viewer():
 
 def test_timeline():
     slides = TOURS["tours"][0]["slides"]
-    # slide 1: view change 1500 + 3800; slide 2: same view 900 + 4000; slide 3: view change 1500 +
+    # slide 1: view change 1200 + 3800; slide 2: same view 900 + 4000; slide 3: view change 1200 +
     # 2500 + 3 steps × 1800 (labels "send"/"run"/"complete"), then end hold + caption fade + beat
-    assert R.timeline(MODEL, slides) == [5300, 10200, 10200 + 1500 + 2500 + 3 * 1800 + 4900]
-    assert R.timeline(MODEL, slides, "slow")[0] == 2400 + 3800
+    assert R.timeline(MODEL, slides) == [5000, 9900, 9900 + 1200 + 2500 + 3 * 1800 + 4900]
+    assert R.timeline(MODEL, slides, "slow")[0] == 1920 + 3800
 
 
 def test_end_hold(tmp_path):
@@ -58,7 +58,7 @@ def test_end_hold(tmp_path):
     assert R.end_hold_ms(tours, "walk") == 6000 and R.end_hold_ms(TOURS, "walk") == 2500
     assert R.end_hold_ms({"tours": [{"id": "walk", "end_hold_ms": 99999}]}, "walk") == 2500
     _, ms, _ = R.shot_script(MODEL, tours, "walk")
-    assert ms == 24500 + 3500
+    assert ms == 23900 + 3500
     bad = [
         f
         for f in L.lint(MODEL, {"tours": [{"id": "t", "end_hold_ms": -1, "slides": [{"view": "index"}]}]}, tmp_path)
@@ -97,7 +97,7 @@ steps:
   - click: {role: menuitem, name: "Record \\u2014 A walk", exact: true, frame: "/plugins/atlas/view"}
   - wait_for: {selector: '[data-atlas-state=presenting]', frame: "/plugins/atlas/view", timeout_ms: 10000}
   - mark: start
-  - wait_for: {selector: '[data-atlas-state=tour-done]', frame: "/plugins/atlas/view", timeout_ms: 44500}
+  - wait_for: {selector: '[data-atlas-state=tour-done]', frame: "/plugins/atlas/view", timeout_ms: 43900}
   - mark: end
   - hold: 500
 """
@@ -105,7 +105,7 @@ steps:
 
 def test_shot_script_golden():
     text, ms, why = R.shot_script(MODEL, TOURS, "walk", base_url="http://localhost:7870/")
-    assert why == "" and ms == 24500
+    assert why == "" and ms == 23900
     assert text == GOLDEN
 
 

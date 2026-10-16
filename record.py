@@ -34,8 +34,10 @@ STEP_BASE_MS = 1000
 END_HOLD_MS = 2500  # default extra time on the last caption (tour `end_hold_ms`, 0–30000)
 CAPTION_FADE_MS = 400
 BEAT_MS = 2000  # the clean diagram, no caption, before tour-done
-# the camera: a view change (zoom/fade, one hop) and a same-view focus ease, at normal speed
-VIEW_CHANGE_MS = 1500
+# the camera: a view change (a zoom through the portal, or ONE crossfade-zoom for a cousin /
+# multi-level jump — never a hop-by-hop route) and a same-view focus ease, at normal speed
+# (measured in-console: dev/console-framing.mjs prints the take's presenting → tour-done time)
+VIEW_CHANGE_MS = 1200
 SAME_VIEW_MS = 900
 SPEED = {"slow": 1.6, "normal": 1.0, "fast": 0.6}
 MAX_WAIT_MS = 180_000  # Campaign's per-step ceiling

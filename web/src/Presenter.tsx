@@ -4,7 +4,7 @@
 // diagram surface only: on a button / link / field, Tab + Enter + Space stay native (logic.mjs keyOwner).
 import type { LikeC4Model } from '@likec4/core/model'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { BEAT_MS, CAPTION_FADE_MS, END_HOLD_MS, keyOwner, presenterOwns, cycle, dynamicSteps, mdLight, presenterKey, slideDwellMs, stepDwellMs } from './logic.mjs'
+import { BEAT_MS, CAPTION_AWAY_MS, CAPTION_FADE_MS, END_HOLD_MS, keyOwner, presenterOwns, cycle, dynamicSteps, mdLight, presenterKey, slideDwellMs, stepDwellMs } from './logic.mjs'
 import { applyHighlight, clearHighlight } from './highlight'
 import { Button, Kbd } from '@protolabsai/ui/primitives'
 import { Select } from '@protolabsai/ui/forms'
@@ -58,6 +58,8 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
   const first = Math.min(Math.max(start, 0), tour.length - 1)
   const stage = useRef<StageHandle>(null)
   const [view, setView] = useState(tour[first].view)
+  const viewRef = useRef(view)
+  viewRef.current = view
   const [slide, setSlide] = useState(first)
   const [walk, setWalk] = useState(0)
   const [showNotes, setShowNotes] = useState(true)
@@ -68,6 +70,11 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
   const manual = useRef(false)
   const [done, setDone] = useState(false)
   const [captionOut, setCaptionOut] = useState(false)
+  // a slide change: the outgoing caption fades out as the move starts, the incoming one fades in on
+  // arrival (the breadcrumb follows the committed target view from the move's start)
+  const [captionAway, setCaptionAway] = useState(false)
+  const captionAwayRef = useRef(false)
+  captionAwayRef.current = captionAway
   // the framing's safe area: the top chrome and the caption / notes panel, MEASURED. Every slide's
   // caption is laid out (hidden) up front, so a camera move already knows how tall the caption it
   // is arriving at will be.
@@ -107,7 +114,8 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
     const r = rootRef.current?.getBoundingClientRect()
     const live = notesRef.current?.isConnected ? notesRef.current.getBoundingClientRect() : null
     const liveBottom = r && live?.height ? Math.ceil(r.bottom - live.top + 12) : 0
-    return { top: c.top, bottom, clipBottom: Math.max(bottom, showNotes ? liveBottom : 0) }
+    // (once the outgoing caption has faded away, only the arriving slide's reserve matters)
+    return { top: c.top, bottom, clipBottom: captionAwayRef.current ? bottom : Math.max(bottom, showNotes ? liveBottom : 0) }
   }, [showNotes])
   const adhocRef = useRef(false)
   const adhocNow = useRef<Slide | null>(null)
@@ -136,8 +144,13 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
   // the caption on screen changed: the diagram's clip follows at once (not at the next rest)
   useEffect(() => {
     const id = requestAnimationFrame(() => stage.current?.reclip())
-    return () => cancelAnimationFrame(id)
-  }, [noteSlide, captionOut, showNotes, adhoc])
+    // … and again once a fade-out has finished (the band may then grow)
+    const t = window.setTimeout(() => stage.current?.reclip(), CAPTION_AWAY_MS + 20)
+    return () => {
+      cancelAnimationFrame(id)
+      window.clearTimeout(t)
+    }
+  }, [noteSlide, captionOut, captionAway, showNotes, adhoc])
   const st = useRef({ slide, focused, walk })
   st.current = { slide, focused, walk }
 
@@ -235,8 +248,13 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
         setSlide(i)
         adhocRef.current = false
         setAdhoc(null)
-        await showSlide(tour[i])
-        if (st.current.slide === i) setNoteSlide(i) // the caption changes when the camera arrives
+        setCaptionAway(true)
+        try {
+          await showSlide(tour[i])
+        } finally {
+          if (st.current.slide === i) setNoteSlide(i) // the caption changes when the camera arrives
+          setCaptionAway(false)
+        }
       })
     },
     [run, tour, showSlide],
@@ -479,6 +497,16 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
       get aim() {
         return lastAim.current
       },
+      /** the view the breadcrumb shows / the view the current slide is going to */
+      get subject() {
+        return stage.current?.subject() ?? null
+      },
+      get crumb() {
+        return viewRef.current
+      },
+      get target() {
+        return (adhocRef.current ? adhocNow.current : tour[st.current.slide])?.view ?? null
+      },
       get insets() {
         return insets()
       },
@@ -506,6 +534,7 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
         named={named}
         onNavigateTo={(_to, el) => el && drill(el.id)}
         onNodeClick={(n) => setFocused(n.id)}
+        onCommit={(v) => setView(v)}
         onSettled={(v) => {
           setView(v)
           setCropped(!!stage.current?.cropped())
@@ -556,7 +585,7 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
             </aside>
           ))}
         </div>
-        <aside ref={notesRef as any} data-presenter-chrome className={`notes${captionOut ? ' notes--out' : ''}`} aria-live="polite" style={{ ['--caption-fade' as any]: `${CAPTION_FADE_MS}ms` }}>
+        <aside ref={notesRef as any} data-presenter-chrome className={`notes${captionOut || captionAway ? ' notes--out' : ''}`} aria-live="polite" style={{ ['--caption-fade' as any]: `${captionAway && !captionOut ? CAPTION_AWAY_MS : CAPTION_FADE_MS}ms` }}>
           {!record && (
           <div className="notes-head">
             {tours.find((t) => t.id === tourId)?.title ?? 'Tour'} · slide {slide + 1}

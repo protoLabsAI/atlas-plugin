@@ -43,7 +43,8 @@ export function contentBox(view, ids, ke = 1) {
  * or null for the whole view. → {vp: {x, y, zoom}, k, ke, cropped, visible: [ids], partial: [ids]}
  */
 export function frameSlide(view, canvas, insets = {}, { subject = null, named = null, kFixed, keFixed = 1, zoomCap = 1.25, t = LEGIBLE } = {}) {
-  const boxOf = (ids) => contentBox(view, ids, keFixed)
+  const frameAlso = [] // containers framed whole with the subject (a caption-named one)
+  const boxOf = (ids) => contentBox(view, [...ids, ...frameAlso], keFixed)
   const S0 = safeRect(canvas, insets)
   const S = { ...S0, x2: S0.x + S0.width, y2: S0.y + S0.height }
   const leaves = leavesOf(view)
@@ -63,7 +64,10 @@ export function frameSlide(view, canvas, insets = {}, { subject = null, named = 
     const pick = new Set()
     for (const id of named ?? []) {
       if (leafIds.has(id)) pick.add(id)
-      else for (const n of leaves) if (n.id.startsWith(id + '.')) pick.add(n.id)
+      else {
+        for (const n of leaves) if (n.id.startsWith(id + '.')) pick.add(n.id)
+        if (has(id)) frameAlso.push(id) // a named container is shown whole, border and title
+      }
     }
     if (pick.size) {
       ids = [...pick]

@@ -106,3 +106,16 @@ test('the example model under many canvases / chrome sizes: never a partial node
           assert.deepEqual(frameSlide(v, c, ins, { subject: [nd.id] }).partial, [], `${id} focus ${nd.id} ${JSON.stringify(ins)} ${JSON.stringify(c)}`)
       }
 })
+
+test('below the floor, a caption-named CONTAINER is framed whole (border and title), with its leaves', () => {
+  const leaves = [...Array(10)].map((_, i) => n(`p.s${i}`, 100, 100 + i * 400))
+  const p = { id: 'p', x: 60, y: 40, width: 400, height: 10 * 400 + 40, children: leaves.map((x) => x.id) }
+  const far = n('far', 100, -900)
+  const v = { bounds: { x: 60, y: -900, width: 400, height: 4980 }, nodes: [p, ...leaves, far], edges: [] }
+  const f = frameSlide(v, canvas, insets, { named: ['p'] })
+  const S = safeRect(canvas, insets)
+  const r = scr(p, f.vp)
+  assert.ok(f.cropped)
+  assert.ok(r.y >= S.y - 1 && r.y2 <= S.y + S.height + 1, `container cut: ${JSON.stringify(r)}`)
+  assert.ok(leaves.every((x) => f.visible.includes(x.id)) && !f.visible.includes('far'))
+})

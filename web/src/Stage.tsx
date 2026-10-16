@@ -16,7 +16,7 @@ import type { LikeC4Model } from '@likec4/core/model'
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { frameSlide, safeRect } from './framing.mjs'
 import { fitBox, interpolateZoom, parentView, viewChain, visInit, visReduce } from './logic.mjs'
-import { FADE_MS, ZOOM_MS, easeInOutCubic, factor, patchCamera, reducedMotion } from './motion'
+import { FADE_MS, JUMP_MS, ZOOM_MS, easeInOutCubic, factor, patchCamera, reducedMotion } from './motion'
 
 type Box = { x: number; y: number; width: number; height: number }
 type Viewport = { x: number; y: number; zoom: number }
@@ -44,6 +44,8 @@ export type StageHandle = {
   aim: (subject: string[] | null) => void
   /** present / record: re-apply the clip to the band between the chrome and the caption (it changed) */
   reclip: () => void
+  /** present / record: the leaves a slide too big to show whole narrowed to (caption-named), else null */
+  subject: () => string[] | null
 }
 
 type Props = {
@@ -60,6 +62,8 @@ type Props = {
   onCanvasClick?: () => void
   onNodeContextMenu?: (node: any, e: MouseEvent) => void
   onSettled?: (view: string) => void
+  /** a view change is under way and will end on `view` (the breadcrumb follows from the start) */
+  onCommit?: (view: string) => void
   /** present / record: bigger titles + edge labels, hide text that would render illegibly, and
    *  frame the densest window when the whole view can't be shown legibly */
   legible?: boolean
@@ -97,7 +101,7 @@ function animate(ms: number, frame: (t: number) => void, reverse = false) {
 }
 
 export const Stage = forwardRef<StageHandle, Props>(function Stage(
-  { model, data, initialView, scheme, themeCss, tour = [], pad = PAD_DEFAULT, layerProps, onNodeClick, onNavigateTo, onCanvasClick, onNodeContextMenu, onSettled, legible, insets: insetsFn, named: namedFn },
+  { model, data, initialView, scheme, themeCss, tour = [], pad = PAD_DEFAULT, layerProps, onNodeClick, onNavigateTo, onCanvasClick, onNodeContextMenu, onSettled, onCommit, legible, insets: insetsFn, named: namedFn },
   ref,
 ) {
   const views = useMemo(() => {
@@ -113,6 +117,8 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
   const fullRect = (): Box => ({ x: 0, y: 0, ...canvasSize() })
   const insets = () => insetsFn?.() ?? { top: 0, bottom: 0 }
   const aimRef = useRef<string[] | null>(null)
+  const onCommitRef = useRef(onCommit)
+  onCommitRef.current = onCommit
   const ownMove = useRef(false) // our own animated moves are already framed — don't re-aim them
   const framed = (viewId: string, key?: number, subject?: string[] | null) =>
     frameSlide(views.get(viewId), canvasSize(), insets(), { subject: subject ?? null, named: subject ? null : (namedFn?.(viewId) ?? null), kFixed: key != null ? layerScale.current.get(key)?.k : undefined, keFixed: key != null ? layerScale.current.get(key)?.ke : undefined }) as any
@@ -258,7 +264,7 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
   const currentView = () => st.current.layers.find((l) => l.key === st.current.active)?.viewId ?? initialView
 
   const transition = useCallback(
-    async (target: string) => {
+    async (target: string, jump = false) => {
       const fromKey = st.current.active
       const srcView = currentView()
       if (srcView === target || !views.has(target)) return
@@ -277,7 +283,8 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
 
       let kind: 'in' | 'out' | 'fade' = 'fade'
       let portal: string | null = null
-      if (parentOf(target) === srcView) ((kind = 'in'), (portal = portalFor(srcView, target)))
+      if (jump) kind = 'fade'
+      else if (parentOf(target) === srcView) ((kind = 'in'), (portal = portalFor(srcView, target)))
       else if (parentOf(srcView) === target) ((kind = 'out'), (portal = portalFor(target, srcView)))
       const still = reducedMotion()
       if (!portal || still) kind = 'fade'
@@ -300,12 +307,26 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
       const cullTimer = vpDest ? window.setInterval(() => cull(toKey, vpDest), 120) : 0
       if (vpDest) cull(toKey, vpDest)
 
+      // the target view is committed now: the breadcrumb follows it from the move's start
+      onCommitRef.current?.(target)
       if (kind === 'fade') {
         const vpB = vpFor(target, toKey)
-        await animate(still ? 160 : FADE_MS * factor(), (t) => {
-          if (!still) B.xyflow.setViewport({ ...vpB, zoom: vpB.zoom * lerp(0.94, 1, t), x: lerp(W / 2 - (W / 2 - vpB.x) * 0.94, vpB.x, t), y: lerp(H / 2 - (H / 2 - vpB.y) * 0.94, vpB.y, t) })
-          elA.style.opacity = String(1 - t)
-          elB.style.opacity = String(t)
+        const vpA = A.xyflow.getViewport()
+        // both scale about the safe rect's centre (a shrink keeps the source inside its frame)
+        const S = legible ? safeRect(canvasSize(), insets()) : fullRect()
+        const cx = S.x + S.width / 2
+        const cy = S.y + S.height / 2
+        const about = (vp: any, s: number) => ({ zoom: vp.zoom * s, x: cx - (cx - vp.x) * s, y: cy - (cy - vp.y) * s })
+        // a jump (cousin / several levels) reads as a move: the source recedes while the target
+        // arrives; an unrelated view just crossfades in
+        const sA = jump ? 0.9 : 1
+        await animate(still ? 160 : (jump ? JUMP_MS : FADE_MS) * factor(), (t) => {
+          if (!still) {
+            B.xyflow.setViewport(about(vpB, lerp(jump ? 1.08 : 0.94, 1, t)))
+            if (sA !== 1) A.xyflow.setViewport(about(vpA, lerp(1, sA, t)))
+          }
+          elA.style.opacity = String(1 - smoothstep(0, 0.7, t))
+          elB.style.opacity = String(smoothstep(0.3, 1, t))
         })
       } else {
         // roles: P = parent layer (camera flies into portal), C = child layer (emerges from it)
@@ -360,7 +381,9 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
       let common = 0
       while (common < from.length && common < to.length && from[common] === to[common]) common++
       const path = common > 0 ? [...from.slice(common - 1, -1).reverse(), ...to.slice(common)] : [target]
-      for (const v of path) if (v !== currentView()) await transition(v)
+      // parent ↔ child: the zoom through the portal. Anything further (a cousin, a grandchild) is ONE
+      // continuous move — a crossfade-zoom straight to the target; no intermediate view ever "arrives"
+      await transition(target, path.filter((v) => v !== currentView()).length > 1)
     },
     [chain, transition],
   )
@@ -386,6 +409,11 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
       ready: () => firstReady.current.promise,
       cropped: () => !!legible && !!framed(currentView(), st.current.active).cropped,
       reclip: () => clip(),
+      subject: () => {
+        if (!legible) return null
+        const f = framed(currentView(), st.current.active, aimRef.current)
+        return f.cropped && !aimRef.current ? f.centred : null
+      },
       aim: (subject: string[] | null) => {
         aimRef.current = subject && subject.length ? subject : null
       },

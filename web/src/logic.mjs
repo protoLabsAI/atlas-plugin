@@ -710,6 +710,8 @@ export const STEP_BASE_MS = 1000
 // fades (400 ms), then the clean diagram holds a 2 s beat — then tour-done
 export const END_HOLD_MS = 2500
 export const CAPTION_FADE_MS = 400
+/** a slide change: the outgoing caption fades out over this as the camera starts */
+export const CAPTION_AWAY_MS = 250
 export const BEAT_MS = 2000
 export const outroMs = (endHold = END_HOLD_MS) => endHold + CAPTION_FADE_MS + BEAT_MS
 

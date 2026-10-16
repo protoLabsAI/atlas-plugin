@@ -1,13 +1,17 @@
 // In-console framing check of a RECORD take: drives the real console exactly as the record shot
 // script does (Atlas rail → docks collapsed → Tour options → Record), then, while the take plays:
 //  - every ~100 ms (mid-transition included): nothing visible draws under the top chrome or the
-//    caption (element rect ∩ the stage's clip, against the measured breadcrumb / caption);
+//    caption (element rect ∩ the stage's clip, against the measured breadcrumb / caption); the
+//    breadcrumb shows the slide's target view within 300 ms of the slide change; and wherever the
+//    picture STOPS (≥ 300 ms without motion), in any layer, nothing is partial or clip-cut — an
+//    intermediate view never sits on screen cropped;
 //  - at each settled slide / step: every visible node, compound, edge and edge-label chip is wholly
 //    inside the safe rect (or off canvas / faded out), the content is centred (±5 %), and the
 //    slide's SUBJECT is complete (its focus / step ends, else every leaf of the view);
 // and writes a contact sheet of the settled frames.
 //   PLAYWRIGHT_FROM=<dir> node dev/console-framing.mjs [--host http://127.0.0.1:7953] [--token …]
-//     [--size 1280x720] [--dark] [--sheet path]
+//     [--size 1280x720] [--dark] [--sheet path] [--tour-title 'Framing test: cousin jumps']
+// (the cousin-jump test tour is dev/jumps.tour.json — add it to the host model's atlas.tours.json)
 import { createRequire } from 'node:module'
 import { readdirSync } from 'node:fs'
 import { join } from 'node:path'
@@ -41,7 +45,8 @@ for (const name of ['Toggle side panel', 'Toggle bottom panel']) {
 }
 await page.waitForTimeout(1000)
 await frame.getByRole('button', { name: 'Tour options' }).click()
-await frame.getByRole('menuitem', { name: /^Record/ }).first().click()
+const TOUR_TITLE = arg('--tour-title', '')
+await frame.getByRole('menuitem', { name: TOUR_TITLE ? `Record — ${TOUR_TITLE}` : /^Record/, exact: !!TOUR_TITLE }).first().click()
 await frame.waitForSelector('[data-atlas-state=presenting]', { timeout: 10000 })
 
 const sample = () => frame.evaluate(() => {
@@ -60,6 +65,8 @@ const sample = () => frame.evaluate(() => {
   const side = W * 0.04
   const S = { x: side - 1, y: chromeBottom + 8 - 1, x2: W - side + 1, y2: capTop - 12 + 1 }
   const seen = (el, sr) => { for (let e = el; e && e !== sr; e = e.parentElement) if (+getComputedStyle(e).opacity < 0.05) return false; return true }
+  const sig = []
+  const badAll = [] // any visible layer (an in-flight one too)
   const under = [] // mid-move rule: nothing visible under the chrome / caption
   const bad = []
   const shown = []
@@ -86,15 +93,17 @@ const sample = () => frame.evaluate(() => {
       const vx = Math.max(b.x, 0), vx2 = Math.min(b.x2, W)
       if (vy2 <= vy || vx2 <= vx) continue
       if (vy < chromeBottom - 0.5 || vy2 > capTop + 0.5) under.push(`${b.id} ${Math.round(vy)}–${Math.round(vy2)}`)
-      if (layer !== active) continue
       const inS = b.x >= S.x && b.y >= S.y && b.x2 <= S.x2 && b.y2 <= S.y2
+      sig.push(`${Math.round(b.x)},${Math.round(b.y)},${Math.round(b.x2)}`)
+      if (b.y < clipTop - 0.5 || b.y2 > clipBottom + 0.5 || !inS) badAll.push(`${layer.dataset.view} ${b.id}`)
+      if (layer !== active) continue
       // drawn only in part (cut by the stage clip)?
       if (b.y < clipTop - 0.5 || b.y2 > clipBottom + 0.5) { bad.push(`${b.id} CUT BY CLIP ${Math.round(b.y)}–${Math.round(b.y2)} clip ${Math.round(clipTop)}–${Math.round(clipBottom)}`); continue }
       if (!inS) bad.push(`${b.id} ${Math.round(b.x)},${Math.round(b.y)}–${Math.round(b.x2)},${Math.round(b.y2)}${el.hasAttribute('data-atlas-out') ? ' (marked out, op ' + getComputedStyle(el).opacity + ')' : ''} S=${Math.round(S.x)},${Math.round(S.y)}–${Math.round(S.x2)},${Math.round(S.y2)}`)
       else if (kind === 'node' || kind === 'compound') { shown.push(b); visibleIds.add(id) }
     }
   }
-  const subject = P.aim ?? leaves
+  const subject = P.aim ?? P.subject ?? leaves // a focus / step, a caption-named narrowing, else the whole view
   const missing = subject.filter((id) => !visibleIds.has(id))
   const cx = (Math.min(...shown.map((b) => b.x)) + Math.max(...shown.map((b) => b.x2))) / 2
   const cy = (Math.min(...shown.map((b) => b.y)) + Math.max(...shown.map((b) => b.y2))) / 2
@@ -102,6 +111,7 @@ const sample = () => frame.evaluate(() => {
   return {
     state: document.querySelector('[data-atlas-state]')?.getAttribute('data-atlas-state'),
     slide: P.slide + 1, walk: P.walk, view: P.view, busy: P.busy, under, bad, missing, shown: shown.length,
+    crumb: P.crumb, target: P.target, sig: sig.join('|'), badAll, layers: document.querySelectorAll('.layer').length,
     off: { x: Math.round(cx - sc.x), y: Math.round(cy - sc.y), tolX: Math.round((S.x2 - S.x) * 0.05), tolY: Math.round((S.y2 - S.y) * 0.05) },
   }
 })
@@ -110,6 +120,13 @@ const frames = []
 let failures = 0
 let underFails = 0
 let samples = 0
+let crumbFails = 0
+let crumbChecked = 0
+const flight = []
+const FLIGHT = +arg('--flight-slide', '2')
+let stopFails = 0
+let still = 0
+let prevSig = ''
 let last = ''
 let since = 0
 const done = new Set()
@@ -122,9 +139,25 @@ while (Date.now() - t0 < 180000) {
     underFails++
     if (underFails <= 8) console.log(`FAIL t=${((Date.now() - t0) / 1000).toFixed(1)}s slide ${s.slide}${s.walk ? '.' + s.walk : ''} under chrome/caption: ${s.under.slice(0, 4).join('; ')}`)
   }
-  if (s.state === 'tour-done') break
+  if (s.state === 'tour-done') { console.log(`take: presenting → tour-done ${((Date.now() - t0) / 1000).toFixed(1)} s`); break }
   const key = `${s.slide}.${s.walk}`
   if (key !== last) { last = key; since = Date.now() }
+  const tl = `t=${((Date.now() - t0) / 1000).toFixed(1)}s slide ${s.slide}`
+  // the breadcrumb follows the target view from the move's start
+  if (s.target && s.crumb !== s.target && Date.now() - since > 300) {
+    if (++crumbFails <= 6) console.log(`FAIL ${tl} stale breadcrumb: shows ${s.crumb}, going to ${s.target} (${Date.now() - since} ms after the change)`)
+  }
+  // the picture stopped (no motion for ≥ 300 ms): every visible layer obeys the framing rules
+  still = s.sig === prevSig ? still + 1 : 0
+  prevSig = s.sig
+  if (still === 3 && s.badAll.length) {
+    stopFails++
+    if (stopFails <= 6) console.log(`FAIL ${tl} the picture stopped with something partial / cut (${s.busy ? 'mid-move' : 'at rest'}, ${s.layers} layer(s)): ${s.badAll.slice(0, 4).join('; ')}`)
+  }
+  if (s.target) crumbChecked++
+  // a filmstrip of one move (the change INTO --flight-slide, default 2): every other sample
+  if (s.slide === FLIGHT && s.busy && flight.length < 14 && samples % 2 === 0)
+    flight.push({ label: `t+${Date.now() - since} ms · crumb ${s.crumb}`, b64: (await page.screenshot({ type: 'jpeg', quality: 70 })).toString('base64') })
   if (!s.busy && !done.has(key) && Date.now() - since > 1500) {
     done.add(key)
     const centred = Math.abs(s.off.x) <= s.off.tolX && Math.abs(s.off.y) <= s.off.tolY
@@ -139,6 +172,10 @@ while (Date.now() - t0 < 180000) {
 const sp = await browser.newPage({ viewport: { width: 2000, height: 1200 } })
 await sp.setContent(`<body style="margin:0;background:#111;color:#ddd;font:15px system-ui;display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:6px">${frames.map((f) => `<figure style="margin:0"><img style="width:100%;display:block" src="data:image/jpeg;base64,${f.b64}"><figcaption style="padding:2px 0 6px">${f.label}</figcaption></figure>`).join('')}</body>`)
 await sp.screenshot({ path: SHEET, fullPage: true })
-console.log(`${frames.length - failures}/${frames.length} settled frames pass · ${samples - underFails}/${samples} samples clear of chrome/caption${errs.length ? '\n' + errs.join('\n') : ''}`)
+if (flight.length) {
+  await sp.setContent(`<body style="margin:0;background:#111;color:#ddd;font:15px system-ui;display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:6px">${flight.map((f) => `<figure style="margin:0"><img style="width:100%;display:block" src="data:image/jpeg;base64,${f.b64}"><figcaption style="padding:2px 0 6px">${f.label}</figcaption></figure>`).join('')}</body>`)
+  await sp.screenshot({ path: SHEET.replace(/\.png$/, '-flight.png'), fullPage: true })
+}
+console.log(`${frames.length - failures}/${frames.length} settled frames pass · ${samples - underFails}/${samples} samples clear of chrome/caption · ${crumbFails} stale-breadcrumb samples (of ${crumbChecked}) · ${stopFails} cropped stops${errs.length ? '\n' + errs.join('\n') : ''}`)
 await browser.close()
-process.exit(failures || underFails ? 1 : 0)
+process.exit(failures || underFails || crumbFails || stopFails ? 1 : 0)
