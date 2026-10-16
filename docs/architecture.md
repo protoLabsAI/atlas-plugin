@@ -230,8 +230,16 @@ camera shows:
   pass through the edges naturally (the clip still keeps them off the chrome and caption); the
   rule is applied when the camera arrives.
 
-When a view can't be shown whole legibly, the presenter frames its densest part and offers
-**Fit all**.
+**The slide's subject is always shown whole**: the slide's `focus` if set, else the scoped
+element's children (plus the neighbours the view includes), else every node. Legibility comes
+from hiding secondary text and letting titles shrink to a 9 CSS px floor. Only when even that
+floor can't be met does the presenter frame a subset — the elements the caption names — and only
+if that subset has at least 2 elements and at least half the view; otherwise it shows the whole
+view at the floor. A cropped frame offers **Fit all**.
+
+Moves between views: parent↔child is a zoom into (or out of) the node; multi-level descents and
+ascents are one continuous dive at ~0.9 × a single drill's duration per level; any other jump is
+a single ~1.1 s crossfade-zoom, with the breadcrumb switching at move start.
 
 ### Record mode and state hooks
 

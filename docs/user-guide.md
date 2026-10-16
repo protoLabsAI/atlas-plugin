@@ -114,8 +114,9 @@ keep their usual meaning and only **Esc** belongs to the presenter. **Tab** is n
 | **[** / **]** | Slower / faster transitions (`fast` · `normal` · `slow`), for this session. |
 
 Clicking a node focuses it. The top bar has a tour picker (when there's more than one tour), the
-slide counter, and **×** to exit. When a view is too large to show legibly, the presenter frames
-its densest part and shows **Fit all** to see the whole view.
+slide counter, and **×** to exit. Each slide always shows its whole subject; on a busy view small
+text hides and titles shrink to stay readable. Only if that still isn't legible does the presenter
+frame the part the caption names, and then it shows **Fit all** to see the whole view.
 
 ### Notes and speed
 
