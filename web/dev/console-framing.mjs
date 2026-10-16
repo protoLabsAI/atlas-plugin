@@ -166,6 +166,10 @@ let restCount = null
 const inFlight = []
 const flight = []
 const FLIGHT = +arg('--flight-slide', '2')
+const FLIGHT_MS = +arg('--flight-ms', '80')
+let castStarted = 0
+let cdp = null
+const cast = []
 let stopFails = 0
 let still = 0
 let prevSig = ''
@@ -237,9 +241,23 @@ while (Date.now() - t0 < 180000) {
     restCount = s.nodesVisible
     inFlight.length = 0
   } else inFlight.push({ n: s.nodesVisible, tl, layers: s.layers })
-  // a filmstrip of one move (the change INTO --flight-slide, default 2): every other sample
-  if (s.slide === FLIGHT && (s.busy || still < 2) && Date.now() - since < 3000 && flight.length < 16)
-    flight.push({ label: `t+${Date.now() - since} ms · crumb ${s.crumb}`, b64: (await page.screenshot({ type: 'jpeg', quality: 70 })).toString('base64') })
+  // a filmstrip of one move (the change INTO --flight-slide): the page's own screencast frames
+  // over ~3.5 s, picked every --flight-ms (80) apart
+  if (s.slide === FLIGHT && !castStarted) {
+    castStarted = Date.now()
+    cdp = await page.context().newCDPSession(page)
+    cdp.on('Page.screencastFrame', (f) => {
+      cast.push({ t: Date.now() - castStarted, data: f.data })
+      cdp.send('Page.screencastFrameAck', { sessionId: f.sessionId }).catch(() => {})
+    })
+    await cdp.send('Page.startScreencast', { format: 'jpeg', quality: 70, maxWidth: 1280, everyNthFrame: 1 })
+  }
+  if (castStarted && cdp && Date.now() - castStarted > 3500) {
+    await cdp.send('Page.stopScreencast').catch(() => {})
+    cdp = null
+    let next = 0
+    for (const f of cast) if (f.t >= next && flight.length < 48) (flight.push({ label: `t+${f.t} ms`, b64: f.data }), (next = f.t + FLIGHT_MS))
+  }
   // settled: the slide's own camera has come to rest (≥ 500 ms still, the rest-cull's fade done)
   if (!s.busy && still >= 5 && !done.has(key) && Date.now() - since > 1500) {
     done.add(key)
@@ -256,7 +274,7 @@ const sp = await browser.newPage({ viewport: { width: 2000, height: 1200 } })
 await sp.setContent(`<body style="margin:0;background:#111;color:#ddd;font:15px system-ui;display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:6px">${frames.map((f) => `<figure style="margin:0"><img style="width:100%;display:block" src="data:image/jpeg;base64,${f.b64}"><figcaption style="padding:2px 0 6px">${f.label}</figcaption></figure>`).join('')}</body>`)
 await sp.screenshot({ path: SHEET, fullPage: true })
 if (flight.length) {
-  await sp.setContent(`<body style="margin:0;background:#111;color:#ddd;font:15px system-ui;display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:6px">${flight.map((f) => `<figure style="margin:0"><img style="width:100%;display:block" src="data:image/jpeg;base64,${f.b64}"><figcaption style="padding:2px 0 6px">${f.label}</figcaption></figure>`).join('')}</body>`)
+  await sp.setContent(`<body style="margin:0;background:#111;color:#ddd;font:15px system-ui;display:grid;grid-template-columns:repeat(6,1fr);gap:6px;padding:6px">${flight.map((f) => `<figure style="margin:0"><img style="width:100%;display:block" src="data:image/jpeg;base64,${f.b64}"><figcaption style="padding:2px 0 6px">${f.label}</figcaption></figure>`).join('')}</body>`)
   await sp.screenshot({ path: SHEET.replace(/\.png$/, '-flight.png'), fullPage: true })
 }
 console.log(`${frames.length - failures}/${frames.length} settled frames pass · ${samples - underFails}/${samples} samples clear of chrome/caption · ${crumbFails} stale-breadcrumb samples (of ${crumbChecked}) · ${stopFails} cropped stops · ${emptyFails} near-empty frames · ${pauseFails} mid-move pauses${errs.length ? '\n' + errs.join('\n') : ''}`)

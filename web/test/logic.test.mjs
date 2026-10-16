@@ -259,3 +259,27 @@ test('cleanTours / toursFor keep a LIST focus (#5): node ids in the view, one le
   assert.deepEqual(t.slides.map((s) => s.focus), [['a', 'b'], 'a', undefined, 'c'])
   assert.deepEqual(toursFor(doc, data)[0].slides[0].focus, ['a', 'b'])
 })
+
+test('rampedProgress: ease in, constant cruise, ease out — continuous, monotone, 0 → 1', async () => {
+  const { rampedProgress } = await import('../src/logic.mjs')
+  assert.equal(rampedProgress(0), 0)
+  assert.ok(Math.abs(rampedProgress(1) - 1) < 1e-9)
+  let prev = 0
+  const steps = []
+  for (let i = 1; i <= 100; i++) {
+    const v = rampedProgress(i / 100)
+    assert.ok(v >= prev - 1e-12)
+    steps.push(v - prev)
+    prev = v
+  }
+  // cruising: the middle 60 % moves at one constant speed (no slow-down between levels)
+  const mid = steps.slice(25, 75)
+  assert.ok(Math.max(...mid) - Math.min(...mid) < 1e-9)
+})
+
+test('interpolateZoom exposes its van Wijk length S (a level’s share of a dive)', async () => {
+  const { interpolateZoom } = await import('../src/logic.mjs')
+  const z = interpolateZoom(1.0)([0, 0, 1000], [0, 0, 250])
+  assert.ok(Math.abs(z.S - Math.log(4)) < 1e-9) // pure zoom: |ln(w1 / w0)| / rho
+  assert.ok(interpolateZoom(1.0)([0, 0, 1000], [500, 0, 250]).S > z.S)
+})

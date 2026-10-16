@@ -634,6 +634,16 @@ export function schemeForRgb(rgb) {
 // ---------------------------------------------------------------- camera math
 
 /** van Wijk & Nuij smooth zoom between `[cx, cy, width]` views (same as d3.interpolateZoom.rho). */
+/** A trapezoid velocity profile over p ∈ [0,1]: ease in over the first `r`, constant speed, ease out
+ * over the last `r` — a multi-level dive keeps its pace through the levels. */
+export function rampedProgress(p, r = 0.2) {
+  const q = Math.min(1, Math.max(0, p))
+  const v = 1 / (1 - r) // the cruising speed (the ramps cover r/2 of the distance each)
+  if (q < r) return (v * q * q) / (2 * r)
+  if (q > 1 - r) return 1 - (v * (1 - q) * (1 - q)) / (2 * r)
+  return v * (q - r / 2)
+}
+
 export function interpolateZoom(rho = Math.SQRT2) {
   const rho2 = rho * rho
   const rho4 = rho2 * rho2
@@ -645,19 +655,23 @@ export function interpolateZoom(rho = Math.SQRT2) {
     const d2 = dx * dx + dy * dy
     if (d2 < 1e-12) {
       const S = Math.log(w1 / w0) / rho
-      return (t) => [ux0 + t * dx, uy0 + t * dy, w0 * Math.exp(rho * t * S)]
+      return Object.assign((t) => [ux0 + t * dx, uy0 + t * dy, w0 * Math.exp(rho * t * S)], { S: Math.abs(S) })
     }
     const d1 = Math.sqrt(d2)
     const b0 = (w1 * w1 - w0 * w0 + rho4 * d2) / (2 * w0 * rho2 * d1)
     const b1 = (w1 * w1 - w0 * w0 - rho4 * d2) / (2 * w1 * rho2 * d1)
     const r0 = Math.log(Math.sqrt(b0 * b0 + 1) - b0)
     const S = (Math.log(Math.sqrt(b1 * b1 + 1) - b1) - r0) / rho
-    return (t) => {
-      const s = t * S
-      const c0 = Math.cosh(r0)
-      const u = (w0 / (rho2 * d1)) * (c0 * Math.tanh(rho * s + r0) - Math.sinh(r0))
-      return [ux0 + u * dx, uy0 + u * dy, (w0 * c0) / Math.cosh(rho * s + r0)]
-    }
+    // `.S`: the path's length in van Wijk's metric (log-zoom + pan) — even perceived speed ∝ S
+    return Object.assign(
+      (t) => {
+        const s = t * S
+        const c0 = Math.cosh(r0)
+        const u = (w0 / (rho2 * d1)) * (c0 * Math.tanh(rho * s + r0) - Math.sinh(r0))
+        return [ux0 + u * dx, uy0 + u * dy, (w0 * c0) / Math.cosh(rho * s + r0)]
+      },
+      { S: Math.abs(S) },
+    )
   }
 }
 

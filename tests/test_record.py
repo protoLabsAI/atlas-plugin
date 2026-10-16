@@ -232,8 +232,9 @@ def test_a_dive_of_several_levels_is_one_move():
         }
     }
     assert R.view_chain(model, "c_d") == ["index", "s_d", "c_d"]
-    assert R.view_change_ms(model, "index", "c_d") == R.DIVE_CHANGE_MS  # one continuous dive down
-    assert R.view_change_ms(model, "c_d", "index") == R.DIVE_CHANGE_MS  # … and up
+    # one continuous dive, 0.9 × a single drill (1150 ms) per level + mounting the levels
+    assert R.view_change_ms(model, "index", "c_d") == 2 * 1035 + 300
+    assert R.view_change_ms(model, "c_d", "index") == 2 * 1035 + 300  # … and up
     assert R.view_change_ms(model, "s_d", "c_d") == R.VIEW_CHANGE_MS
 
 

@@ -15,8 +15,8 @@ import { LikeC4ModelProvider, ReactLikeC4, type DiagramApi } from '@likec4/diagr
 import type { LikeC4Model } from '@likec4/core/model'
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { frameSlide, safeRect } from './framing.mjs'
-import { fitBox, interpolateZoom, parentView, viewChain, visInit, visReduce } from './logic.mjs'
-import { DIVE_MS, FADE_MS, JUMP_MS, ZOOM_MS, easeInOutCubic, factor, patchCamera, reducedMotion } from './motion'
+import { fitBox, interpolateZoom, rampedProgress, parentView, viewChain, visInit, visReduce } from './logic.mjs'
+import { DIVE_LEVEL_FRACTION, FADE_MS, JUMP_MS, ZOOM_MS, easeInOutCubic, factor, patchCamera, reducedMotion } from './motion'
 
 type Box = { x: number; y: number; width: number; height: number }
 type Viewport = { x: number; y: number; zoom: number }
@@ -379,7 +379,7 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
   )
 
   // several levels straight down (or up): ONE continuous dive — every level's zoom-through-the-portal
-  // chained on a single eased timeline (DIVE_MS in all). The intermediate views are mounted up front
+  // chained on a single timeline (~0.9 × a single drill per level). The intermediate views are mounted up front
   // and only ever seen in flight; the breadcrumb is on the destination from the start.
   const dive = useCallback(
     async (levels: string[], dir: 'in' | 'out') => {
@@ -443,16 +443,27 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
           el.style.opacity = j === i ? String(1 - a) : j === i + 1 ? String(a) : '0'
         })
       }
-      // one eased timeline over all the levels: T (0 → 1, the camera's depth) → segment + local t
-      await animate(
-        DIVE_MS * factor(),
-        (T) => {
-          const x = Math.min(n, Math.max(0, T * n)) // (the ease can overshoot by a hair)
-          const i = Math.min(n - 1, Math.floor(x))
-          segFrame(i, Math.min(1, Math.max(0, x - i)))
-        },
-        dir === 'out',
-      )
+      // ONE timeline over all the levels, ~0.9 × a single drill per level: ease in at the start,
+      // constant speed through the intermediate levels, ease out at the end. Each level's share of
+      // it is its van Wijk path length (log-zoom), so the zoom rate is even from level to level.
+      const lens = zis.map((z: any) => Math.max(1e-6, z.S ?? 1))
+      const total = lens.reduce((a, b) => a + b, 0)
+      const ends = lens.map((_, i) => lens.slice(0, i + 1).reduce((a, b) => a + b, 0) / total)
+      const ms = n * DIVE_LEVEL_FRACTION * ZOOM_MS * factor()
+      await new Promise<void>((resolve) => {
+        const t0 = performance.now()
+        const tick = (now: number) => {
+          const p = Math.min(1, (now - t0) / ms)
+          const d = rampedProgress(dir === 'out' ? 1 - p : p) // the camera's depth, 0 → 1 (or back)
+          let i = ends.findIndex((e) => d <= e + 1e-9)
+          if (i < 0) i = n - 1
+          const start = i ? ends[i - 1] : 0
+          segFrame(i, Math.min(1, Math.max(0, (d - start) / Math.max(1e-9, ends[i] - start))))
+          if (p < 1) requestAnimationFrame(tick)
+          else resolve()
+        }
+        requestAnimationFrame(tick)
+      })
       const B = handles.current.get(toKey)!
       B.el!.style.opacity = '1'
       moveUntil.current = performance.now() + 150
