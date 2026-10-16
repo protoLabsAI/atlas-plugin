@@ -765,7 +765,7 @@ export function exploreShowPlan(req) {
 export const LIKEC4_TITLE_PX = 19.2
 export const LIKEC4_DESC_RATIO = 0.74
 export const LIKEC4_EDGE_PX = 14
-export const LEGIBLE = { title: 12, desc: 9, edge: 9, kMax: 1.6, keMax: 2 }
+export const LEGIBLE = { title: 12, desc: 9, edge: 9, kMax: 1.6, keMax: 2, floor: 9 }
 
 /**
  * How to frame a view so its text stays legible on screen (CSS px), for present / record:

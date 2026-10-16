@@ -90,6 +90,7 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
       chrome.current.bottoms = clones.map((c) => Math.ceil(r.bottom - (c as HTMLElement).getBoundingClientRect().top + 12))
       const live = notesRef.current?.getBoundingClientRect()
       chrome.current.live = live?.height ? Math.ceil(r.bottom - live.top + 12) : 0
+      stage.current?.reclip()
     }
     measure()
     const ro = new ResizeObserver(measure)
@@ -101,11 +102,42 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
     const c = chrome.current
     const i = st.current.slide
     const bottom = !showNotes ? 0 : Math.max(c.bottoms[i] ?? 0, adhocRef.current ? c.live : 0) || c.live
-    return { top: c.top, bottom }
+    // the clip keeps clear of the caption ON SCREEN too (mid-move it is still the previous one)
+    // (measured now: the caption element is swapped per slide, an observer can miss it)
+    const r = rootRef.current?.getBoundingClientRect()
+    const live = notesRef.current?.isConnected ? notesRef.current.getBoundingClientRect() : null
+    const liveBottom = r && live?.height ? Math.ceil(r.bottom - live.top + 12) : 0
+    return { top: c.top, bottom, clipBottom: Math.max(bottom, showNotes ? liveBottom : 0) }
   }, [showNotes])
   const adhocRef = useRef(false)
+  const adhocNow = useRef<Slide | null>(null)
+  adhocNow.current = adhoc
+  // the elements a slide's caption names (by title or id) — what a slide too big to show legibly
+  // whole narrows to (framing.mjs); never a density guess
+  const named = useCallback(
+    (viewId: string) => {
+      const s = (adhocRef.current ? adhocNow.current : null) ?? tour[st.current.slide]
+      if (!s || s.view !== viewId || !s.note) return null
+      const text = s.note.replace(/[*_`]/g, '').toLowerCase()
+      const esc = (w: string) => w.replace(/[.*+?^$()|[\]{}\\]/g, '\\$&')
+      const words = (w: string) => new RegExp('(^|[^a-z0-9])' + esc(w) + '($|[^a-z0-9])').test(text)
+      const nodes = (data?.views?.[viewId]?.nodes ?? []) as any[]
+      const hit = nodes.filter((n) => {
+        const title = String(n.title ?? '').toLowerCase().trim()
+        const tail = String(n.id).split('.').pop()!.replace(/_/g, ' ').toLowerCase()
+        return (title.length > 2 && words(title)) || (tail.length > 2 && words(tail))
+      })
+      return hit.length ? hit.map((n) => String(n.id)) : null
+    },
+    [tour, data],
+  )
   const [cropped, setCropped] = useState(false)
   const [noteSlide, setNoteSlide] = useState(first)
+  // the caption on screen changed: the diagram's clip follows at once (not at the next rest)
+  useEffect(() => {
+    const id = requestAnimationFrame(() => stage.current?.reclip())
+    return () => cancelAnimationFrame(id)
+  }, [noteSlide, captionOut, showNotes, adhoc])
   const st = useRef({ slide, focused, walk })
   st.current = { slide, focused, walk }
 
@@ -471,6 +503,7 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
         layerProps={LAYER_PROPS}
         legible
         insets={insets}
+        named={named}
         onNavigateTo={(_to, el) => el && drill(el.id)}
         onNodeClick={(n) => setFocused(n.id)}
         onSettled={(v) => {

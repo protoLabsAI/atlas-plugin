@@ -42,6 +42,8 @@ export type StageHandle = {
   fitAll: (ms?: number) => void
   /** the subject of the next camera moves (a focus, a step's ends); null = the whole view */
   aim: (subject: string[] | null) => void
+  /** present / record: re-apply the clip to the band between the chrome and the caption (it changed) */
+  reclip: () => void
 }
 
 type Props = {
@@ -63,7 +65,9 @@ type Props = {
   legible?: boolean
   /** present / record: the measured top chrome + bottom caption panel (px) the framing keeps
    *  clear of — read at the moment of each camera move (so it's the TARGET slide's caption) */
-  insets?: () => { top: number; bottom: number }
+  insets?: () => { top: number; bottom: number; clipBottom?: number }
+  /** present / record: the node ids the current slide's caption names (a too-big view narrows to them) */
+  named?: (viewId: string) => string[] | null
 }
 
 const PAD_DEFAULT = 56
@@ -93,7 +97,7 @@ function animate(ms: number, frame: (t: number) => void, reverse = false) {
 }
 
 export const Stage = forwardRef<StageHandle, Props>(function Stage(
-  { model, data, initialView, scheme, themeCss, tour = [], pad = PAD_DEFAULT, layerProps, onNodeClick, onNavigateTo, onCanvasClick, onNodeContextMenu, onSettled, legible, insets: insetsFn },
+  { model, data, initialView, scheme, themeCss, tour = [], pad = PAD_DEFAULT, layerProps, onNodeClick, onNavigateTo, onCanvasClick, onNodeContextMenu, onSettled, legible, insets: insetsFn, named: namedFn },
   ref,
 ) {
   const views = useMemo(() => {
@@ -111,7 +115,7 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
   const aimRef = useRef<string[] | null>(null)
   const ownMove = useRef(false) // our own animated moves are already framed — don't re-aim them
   const framed = (viewId: string, key?: number, subject?: string[] | null) =>
-    frameSlide(views.get(viewId), canvasSize(), insets(), { subject: subject ?? null, kFixed: key != null ? layerScale.current.get(key)?.k : undefined, keFixed: key != null ? layerScale.current.get(key)?.ke : undefined }) as any
+    frameSlide(views.get(viewId), canvasSize(), insets(), { subject: subject ?? null, named: subject ? null : (namedFn?.(viewId) ?? null), kFixed: key != null ? layerScale.current.get(key)?.k : undefined, keFixed: key != null ? layerScale.current.get(key)?.ke : undefined }) as any
   /** the viewport (whole canvas) a view is shown with */
   const vpFor = (viewId: string, key?: number, subject?: string[] | null) =>
     legible ? framed(viewId, key, subject).vp : fitBox(views.get(viewId).bounds, fullRect(), pad)
@@ -136,8 +140,21 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
   // out (data-atlas-out) — a dimmed neighbour, an edge running off screen, a label cut by the edge
   const culledAt = useRef(new Map<number, string>())
   const moveUntil = useRef(0)
+  const moveToken = useRef(0)
+  // … and the diagram is CLIPPED to the band between the top chrome and the caption, so nothing
+  // (an edge mid-move, a container border) ever draws under them, even mid-transition
+  const clip = () => {
+    const el = stage.current
+    if (!legible || !el) return
+    const c = canvasSize()
+    const ins = insets()
+    const S = safeRect(c, ins)
+    const bottom = Math.max(c.height - S.y - S.height, ins.clipBottom ?? 0)
+    el.style.clipPath = `inset(${Math.max(0, S.y - 4)}px 0 ${Math.max(0, bottom - 4)}px 0)`
+  }
   const cull = (key: number, vp: { x: number; y: number; zoom: number }) => {
     if (!legible) return
+    clip()
     const h = handles.current.get(key)
     const sr = h?.el?.querySelector('.likec4-view')?.shadowRoot
     const cur = h?.xyflow?.getViewport?.()
@@ -276,6 +293,12 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
       visRef.current(fromKey, srcView, { type: 'freeze' })
       visRef.current(toKey, target, { type: 'target', zoom: vpFor(target, toKey).zoom, until: Infinity })
       elA.style.willChange = elB.style.willChange = 'opacity' // composited only while fading
+      // the arriving layer is culled for its DESTINATION camera from the first frame, and again as
+      // its labels / edges render during the hand-off (the per-frame moves are instant ones)
+      const vpDest = legible ? vpFor(target, toKey) : null
+      moveUntil.current = performance.now() + 10000 // released when the hand-off ends
+      const cullTimer = vpDest ? window.setInterval(() => cull(toKey, vpDest), 120) : 0
+      if (vpDest) cull(toKey, vpDest)
 
       if (kind === 'fade') {
         const vpB = vpFor(target, toKey)
@@ -312,6 +335,9 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
       }
 
       elB.style.opacity = '1'
+      window.clearInterval(cullTimer)
+      moveUntil.current = performance.now() + 200
+      if (vpDest) cull(toKey, vpDest)
       visRef.current(toKey, target, { type: 'release', now: performance.now() })
       elA.style.willChange = elB.style.willChange = '' // at rest: no layer hint → text re-rasters crisp
       delete document.documentElement.dataset.atlasTransition
@@ -359,6 +385,7 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
       chain,
       ready: () => firstReady.current.promise,
       cropped: () => !!legible && !!framed(currentView(), st.current.active).cropped,
+      reclip: () => clip(),
       aim: (subject: string[] | null) => {
         aimRef.current = subject && subject.length ? subject : null
       },
@@ -506,7 +533,20 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
                   (zoom: number, ms: number, vp?: any) => {
                     moveUntil.current = Math.max(moveUntil.current, performance.now() + ms + 80)
                     visRef.current(l.key, l.viewId, { type: 'target', zoom, until: performance.now() + ms + 80 })
-                    if (vp) cullRef.current(l.key, vp)
+                    if (vp) {
+                      cullRef.current(l.key, vp)
+                      // labels / edges render (or grow to full size) only part-way through a move —
+                      // a layer just mounted, LikeC4's small-zoom label form: keep judging them
+                      // against the same TARGET until the move lands, so they fade out en route
+                      const token = ++moveToken.current
+                      const end = performance.now() + ms
+                      const again = () => {
+                        if (token !== moveToken.current) return
+                        cullRef.current(l.key, vp)
+                        if (performance.now() < end) window.setTimeout(again, 120)
+                      }
+                      window.setTimeout(again, 60)
+                    }
                   },
                   legible
                     ? (vp: any) => {
@@ -514,14 +554,9 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
                           ownMove.current = false
                           return vp
                         }
-                        if (aimRef.current) return vpFor(l.viewId, l.key, aimRef.current)
-                        // no subject: keep LikeC4's choice of region, but show it inside the safe rect
-                        const c = canvasSize()
-                        const S = safeRect(c, insets())
-                        const z = vp.zoom * Math.min(S.width / c.width, S.height / c.height)
-                        const fx = (c.width / 2 - vp.x) / vp.zoom
-                        const fy = (c.height / 2 - vp.y) / vp.zoom
-                        return { x: S.x + S.width / 2 - fx * z, y: S.y + S.height / 2 - fy * z, zoom: z }
+                        // LikeC4's own moves (a fit after navigating, a walkthrough focus) are re-aimed at
+                        // the slide's subject — the whole view when it has none — in the safe rect
+                        return vpFor(l.viewId, l.key, aimRef.current)
                       }
                     : undefined,
                 )

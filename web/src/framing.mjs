@@ -1,8 +1,10 @@
 // Present / record framing — pure. The camera fits a slide's subject into a SAFE RECT (the canvas
 // minus the measured top chrome, the measured caption / notes panel and side margins), centred,
 // and never cuts through a node: every leaf node ends up either wholly inside the safe rect or
-// wholly off the canvas. When the whole view can't meet the legibility target, the subject
-// becomes a set of whole nodes — the slide's focus, else the densest connected cluster.
+// wholly off the canvas. The slide's SUBJECT is always shown complete: its focus / step ends, else
+// the whole view. Legibility comes from hiding secondary text and accepting smaller titles down
+// to a hard floor (LEGIBLE.floor); only below that may a slide show a subset — the elements its
+// caption names — never one picked by density.
 
 import { LEGIBLE, LIKEC4_EDGE_PX, LIKEC4_TITLE_PX } from './logic.mjs'
 
@@ -36,43 +38,11 @@ export function contentBox(view, ids, ke = 1) {
   return union([...nodes, ...labels])
 }
 
-/** Whole leaf nodes, grown from `seed` along edges (then by distance) while their box still fits S at `zMin`. */
-export function cluster(view, seed, S, zMin) {
-  const leaves = leavesOf(view)
-  const byId = new Map(leaves.map((n) => [n.id, n]))
-  const adj = new Map()
-  for (const e of view.edges ?? []) {
-    if (!byId.has(e.source) || !byId.has(e.target)) continue
-    ;(adj.get(e.source) ?? adj.set(e.source, []).get(e.source)).push(e.target)
-    ;(adj.get(e.target) ?? adj.set(e.target, []).get(e.target)).push(e.source)
-  }
-  const fits = (ids) => fitZoom(contentBox(view, ids), S) >= zMin - 1e-9
-  const chosen = [seed]
-  const queue = [...(adj.get(seed) ?? [])]
-  const seen = new Set([seed])
-  while (queue.length) {
-    const id = queue.shift()
-    if (seen.has(id)) continue
-    seen.add(id)
-    if (fits([...chosen, id])) {
-      chosen.push(id)
-      queue.push(...(adj.get(id) ?? []))
-    }
-  }
-  const c = byId.get(seed)
-  const cx = c.x + c.width / 2
-  const cy = c.y + c.height / 2
-  for (const n of [...leaves].sort((a, b) => Math.hypot(a.x - cx, a.y - cy) - Math.hypot(b.x - cx, b.y - cy))) {
-    if (!chosen.includes(n.id) && fits([...chosen, n.id])) chosen.push(n.id)
-  }
-  return chosen
-}
-
 /**
  * The camera for a slide. `subject`: node ids the slide is about (a focus, a step's two ends),
  * or null for the whole view. → {vp: {x, y, zoom}, k, ke, cropped, visible: [ids], partial: [ids]}
  */
-export function frameSlide(view, canvas, insets = {}, { subject = null, kFixed, keFixed = 1, zoomCap = 1.25, t = LEGIBLE } = {}) {
+export function frameSlide(view, canvas, insets = {}, { subject = null, named = null, kFixed, keFixed = 1, zoomCap = 1.25, t = LEGIBLE } = {}) {
   const boxOf = (ids) => contentBox(view, ids, keFixed)
   const S0 = safeRect(canvas, insets)
   const S = { ...S0, x2: S0.x + S0.width, y2: S0.y + S0.height }
@@ -82,31 +52,31 @@ export function frameSlide(view, canvas, insets = {}, { subject = null, kFixed, 
   if (!all) return { vp: { x: 0, y: 0, zoom: 1 }, k: 1, ke: 1, cropped: false, visible: [], partial: [] }
   const zAll = fitZoom(all, S0)
   const k = kFixed ?? Math.min(t.kMax, Math.max(1, t.title / (LIKEC4_TITLE_PX * zAll)))
-  const zMin = t.title / (LIKEC4_TITLE_PX * k)
-  let ids = subject?.filter((id) => (view.nodes ?? []).some((n) => n.id === id)) ?? []
-  const subjectFrame = ids.length > 0
-  const core = new Set(ids) // a focus / step subject is never let go
-  let B
+  // the hard floor: titles may shrink to t.floor CSS px on screen, no further
+  const zMin = (t.floor ?? t.title) / (LIKEC4_TITLE_PX * k)
+  const has = (id) => (view.nodes ?? []).some((n) => n.id === id)
+  let ids = subject?.filter(has) ?? []
   let cropped = false
-  if (ids.length) B = boxOf(ids)
-  else if (zAll >= zMin - 1e-9) B = all
-  else {
-    // the densest connected cluster of WHOLE nodes that's legible
-    const degree = (id) => (view.edges ?? []).filter((e) => e.source === id || e.target === id).length
-    const seeds = [...leaves].sort((a, c) => degree(c.id) - degree(a.id)).slice(0, 6)
-    let best = null
-    for (const s of seeds) {
-      const c = cluster(view, s.id, S0, zMin)
-      if (!best || c.length > best.length) best = c
+  if (!ids.length && zAll < zMin - 1e-9) {
+    // below the hard floor: the elements the caption names (leaves; a named container → its leaves)
+    const leafIds = new Set(leaves.map((n) => n.id))
+    const pick = new Set()
+    for (const id of named ?? []) {
+      if (leafIds.has(id)) pick.add(id)
+      else for (const n of leaves) if (n.id.startsWith(id + '.')) pick.add(n.id)
     }
-    ids = best ?? []
-    B = boxOf(ids) ?? all
-    cropped = true
+    if (pick.size) {
+      ids = [...pick]
+      cropped = true
+    }
   }
+  const subjectFrame = ids.length > 0
+  const core = new Set(ids) // a focus / step / named subject is never let go
+  let B = ids.length ? boxOf(ids) : all
   // place: B inside the safe rect; then no leaf may straddle the canvas edge or the safe rect
   const C = { x: 0, y: 0, x2: canvas.width, y2: canvas.height }
-  // a crop holds the legible zoom (a little over, for air); a subject frame stops at zoomCap
-  let zoom = cropped ? Math.min(fitZoom(B, S0), zMin * 1.15) : Math.min(fitZoom(B, S0), ids.length ? zoomCap : Infinity)
+  // a subject frame stops at zoomCap; the whole view just fits
+  let zoom = Math.min(fitZoom(B, S0), ids.length ? zoomCap : Infinity)
   const evaluate = (z, cx, cy) => {
     // flow → screen: sx = fx * z + vx, with (cx, cy) landing on the safe rect's centre
     const vx = S.x + S0.width / 2 - cx * z

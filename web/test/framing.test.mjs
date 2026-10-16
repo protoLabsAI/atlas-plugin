@@ -46,13 +46,24 @@ test('a small view: the whole view, centred in the safe rect', () => {
   assertFramed(v, f, 'small')
 })
 
-test('a wide flow: whole nodes only, centred (never a node cut by the canvas / caption)', () => {
-  const nodes = [...Array(9)].map((_, i) => n(`s${i}`, i * 560, (i % 3) * 260))
+test('a view above the title floor: the WHOLE view, never a subset', () => {
+  const nodes = [...Array(7)].map((_, i) => n(`s${i}`, i * 560, (i % 3) * 260))
+  const v = { bounds: { x: 0, y: 0, width: 6 * 560 + 320, height: 700 }, nodes, edges: [] }
+  const f = frameSlide(v, canvas, insets, { named: ['s0'] })
+  assert.equal(f.cropped, false)
+  assert.equal(f.visible.length, 7)
+  assertFramed(v, f, 'whole')
+})
+
+test('below the title floor: the caption-named nodes (whole, centred); unnamed → still the whole view', () => {
+  const nodes = [...Array(14)].map((_, i) => n(`s${i}`, i * 560, (i % 3) * 260))
   const edges = nodes.slice(1).map((m, i) => ({ id: `e${i}`, source: nodes[i].id, target: m.id }))
-  const v = { bounds: { x: 0, y: 0, width: 8 * 560 + 320, height: 700 }, nodes, edges }
-  const f = frameSlide(v, canvas, insets)
-  assert.ok(f.cropped && f.partial.length === 0, JSON.stringify(f))
-  assertFramed(v, f, 'wide')
+  const v = { bounds: { x: 0, y: 0, width: 13 * 560 + 320, height: 700 }, nodes, edges }
+  const f = frameSlide(v, canvas, insets, { named: ['s6', 's7'] })
+  assert.ok(f.cropped && f.partial.length === 0 && f.visible.includes('s6') && f.visible.includes('s7'), JSON.stringify(f))
+  assertFramed(v, f, 'named')
+  const g = frameSlide(v, canvas, insets)
+  assert.equal(g.visible.length, 14)
 })
 
 test('a subject (a step\'s two ends) with neighbours close by', () => {
@@ -87,7 +98,10 @@ test('the example model under many canvases / chrome sizes: never a partial node
   for (const ins of [{ top: 30, bottom: 60 }, { top: 46, bottom: 127 }, { top: 70, bottom: 200 }])
     for (const c of [{ width: 1280, height: 720 }, { width: 1150, height: 712 }, { width: 900, height: 600 }])
       for (const [id, v] of Object.entries(out.model.views)) {
-        assert.deepEqual(frameSlide(v, c, ins).partial, [], `${id} ${JSON.stringify(ins)} ${JSON.stringify(c)}`)
+        const f = frameSlide(v, c, ins)
+        assert.deepEqual(f.partial, [], `${id} ${JSON.stringify(ins)} ${JSON.stringify(c)}`)
+        // no caption names → the subject is the whole view: every leaf shown
+        assert.equal(f.visible.length, v.nodes.filter((x) => !x.children?.length && x.width > 0).length, `${id} incomplete ${JSON.stringify(c)}`)
         for (const nd of v.nodes.filter((x) => !x.children?.length))
           assert.deepEqual(frameSlide(v, c, ins, { subject: [nd.id] }).partial, [], `${id} focus ${nd.id} ${JSON.stringify(ins)} ${JSON.stringify(c)}`)
       }
