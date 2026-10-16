@@ -177,7 +177,7 @@ continuous take in record mode, and predicts its length.
 | Parameter | Meaning |
 |---|---|
 | `tour` | A tour id; `"auto"` always exists. Every slide must pass the tour checks. |
-| `base_url` | Leave it blank: the script records **this agent's own console**, at the URL it is served on (`A2A_PUBLIC_URL` if set, else the port the running server bound — the same address its A2A card advertises). If that can't be known, the tool refuses instead of guessing. Pass `http(s)://host[:port][/path]` only to record a different console on purpose; the result then starts with a warning. |
+| `base_url` | Leave it blank: the script records **this agent's own console**, at the URL it is served on (core's `graph.sdk.console_url()`: `A2A_PUBLIC_URL` if set, else the host/port the running server bound; a hub-spawned fleet member records its own console, not the hub's `/agents/<id>` path. Older cores: `A2A_PUBLIC_URL`, else the bound port). If that can't be known, the tool refuses instead of guessing. Pass `http(s)://host[:port][/path]` only to record a different console on purpose; the result then starts with a warning. |
 | `color_scheme` | `dark` or `light`. |
 | `viewport` | `WIDTHxHEIGHT` (3–4 digits each). |
 | `bearer_env` | The **name** of an environment variable holding the console token (`[A-Z_][A-Z0-9_]*`), when the console needs one. It adds `auth: {bearer_env: …}`. Alternatively give the recorder an `auth: {storage_state: …}` holding `protoagent.authToken` in localStorage. |
