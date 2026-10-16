@@ -9,12 +9,13 @@ view, start the tour from the Present menu's "Record" item, ``mark: start``, wai
 ``tour-done``, ``mark: end``. No code coupling — it is just text.
 
 The timing here MUST match the viewer's (``web/src/logic.mjs`` ``slideDwellMs`` / ``stepDwellMs``
-/ ``END_HOLD_MS`` / ``CAPTION_FADE_MS`` / ``BEAT_MS``) — ``tests/test_record.py`` pins both to the same
+/ ``END_HOLD_MS`` / ``FINAL_CAPTION_MIN_MS`` / ``CAPTION_FADE_MS`` / ``BEAT_MS``) — ``tests/test_record.py`` pins both to the same
 numbers.
 
-The end of a take: the last slide's reading-time dwell, then ``end_hold_ms`` more (a tour field,
-default 2.5 s) so the last caption can be read, then the caption fades out (400 ms) and the clean
-diagram holds a 2 s beat — and only then ``data-atlas-state=tour-done`` (where an outro cuts).
+The end of a take: the last slide's reading-time dwell, then ``end_hold_ms`` more (a tour field;
+default 1.5 s, topped up so the last caption is up ≥ 5 s in all), then the caption fades out
+(400 ms) and the clean diagram holds ``end_beat_ms`` (a tour field, default 1 s) — and only then
+``data-atlas-state=tour-done`` (where an outro cuts).
 """
 
 from __future__ import annotations
@@ -31,9 +32,10 @@ PER_WORD_MS = 260
 MAX_SLIDE_MS = 15_000
 MIN_STEP_MS = 1800
 STEP_BASE_MS = 1000
-END_HOLD_MS = 2500  # default extra time on the last caption (tour `end_hold_ms`, 0–30000)
+END_HOLD_MS = 1500  # default extra time on the last caption (tour `end_hold_ms`, 0–30000)
+FINAL_CAPTION_MIN_MS = 5000  # by default the last caption is up at least this long in all
 CAPTION_FADE_MS = 400
-BEAT_MS = 2000  # the clean diagram, no caption, before tour-done
+BEAT_MS = 1000  # the clean diagram, no caption, before tour-done (tour `end_beat_ms`, 0–5000)
 # the camera: a view change (a zoom through the portal, or ONE crossfade-zoom for a cousin /
 # multi-level jump — never a hop-by-hop route) and a same-view focus ease, at normal speed
 # (measured in-console: dev/console-framing.mjs prints the take's presenting → tour-done time)
@@ -62,19 +64,31 @@ def step_dwell_ms(label: str | None) -> int:
     return min(MAX_SLIDE_MS, max(MIN_STEP_MS, STEP_BASE_MS + words(label) * PER_WORD_MS))
 
 
-def end_hold_ms(tours: dict | None, tour: str) -> int:
-    """The tour's ``end_hold_ms`` (validated 0–30000) or the default."""
+def _tour_int(tours: dict | None, tour: str, key: str, lo: int, hi: int) -> int | None:
     for t in L.tour_list(tours):
         if t.get("id") == tour:
-            v = t.get("end_hold_ms")
-            if isinstance(v, int) and not isinstance(v, bool) and L.END_HOLD_MIN_MS <= v <= L.END_HOLD_MAX_MS:
+            v = t.get(key)
+            if isinstance(v, int) and not isinstance(v, bool) and lo <= v <= hi:
                 return v
-    return END_HOLD_MS
+    return None
 
 
-def outro_ms(end_hold: int = END_HOLD_MS) -> int:
+def end_hold_ms(tours: dict | None, tour: str, last_dwell: int = FINAL_CAPTION_MIN_MS) -> int:
+    """The tour's ``end_hold_ms`` (validated 0–30000), else the default — topped up so the last
+    caption (up for ``last_dwell`` already) is on screen ``FINAL_CAPTION_MIN_MS`` in all."""
+    v = _tour_int(tours, tour, "end_hold_ms", L.END_HOLD_MIN_MS, L.END_HOLD_MAX_MS)
+    return v if v is not None else max(END_HOLD_MS, FINAL_CAPTION_MIN_MS - last_dwell)
+
+
+def end_beat_ms(tours: dict | None, tour: str) -> int:
+    """The tour's ``end_beat_ms`` (validated 0–5000) or the default clean beat."""
+    v = _tour_int(tours, tour, "end_beat_ms", L.END_BEAT_MIN_MS, L.END_BEAT_MAX_MS)
+    return BEAT_MS if v is None else v
+
+
+def outro_ms(end_hold: int = END_HOLD_MS, beat: int = BEAT_MS) -> int:
     """From the last slide's dwell ending to tour-done."""
-    return end_hold + CAPTION_FADE_MS + BEAT_MS
+    return end_hold + CAPTION_FADE_MS + beat
 
 
 def tour_slides(model: dict, tours: dict | None, tour: str) -> tuple[list[dict] | None, str, str]:
@@ -89,24 +103,29 @@ def tour_slides(model: dict, tours: dict | None, tour: str) -> tuple[list[dict] 
     return None, "", f"unknown tour {tour!r}. Tours: {', '.join(known)}"
 
 
-def timeline(model: dict, slides: list[dict], speed: str = "normal", end_hold: int = END_HOLD_MS) -> list[int]:
+def timeline(
+    model: dict, slides: list[dict], speed: str = "normal", end_hold: int | None = None, beat: int = BEAT_MS
+) -> list[int]:
     """Milliseconds from the start of the take until each slide is DONE (cumulative), the last
     entry running on to tour-done (end hold + caption fade + beat) — the schedule the viewer runs."""
     k = SPEED.get(speed, 1.0)
     vs = L.views(model)
-    out, t, prev = [], 0, None
+    out, t, prev, last_dwell = [], 0, None, 0
     for i, s in enumerate(slides):
         v = vs.get(s.get("view")) or {}
         t += round((VIEW_CHANGE_MS if s.get("view") != prev else (SAME_VIEW_MS if i else 0)) * k)
         prev = s.get("view")
-        t += slide_dwell_ms(s)
+        last_dwell = slide_dwell_ms(s)
         if L.view_kind(v) == "dynamic" and not s.get("step"):
             for n in L.steps_of(v):
                 e = next((e for e in v.get("edges") or [] if str(e.get("id", "")).startswith(f"step-{n:02d}")), {})
-                t += step_dwell_ms(e.get("label"))
+                last_dwell += step_dwell_ms(e.get("label"))
+        t += last_dwell
         out.append(t)
     if out:
-        out[-1] += outro_ms(end_hold)
+        # end_hold None = the default, topped up to FINAL_CAPTION_MIN_MS of last caption
+        hold = max(END_HOLD_MS, FINAL_CAPTION_MIN_MS - last_dwell) if end_hold is None else end_hold
+        out[-1] += outro_ms(hold, beat)
     return out
 
 
@@ -170,7 +189,8 @@ def shot_script(
         return None, 0, f"base_url {base_url!r} must be an http(s) URL like http://localhost:7870"
     if bearer_env and not re.fullmatch(r"[A-Z_][A-Z0-9_]*", bearer_env):
         return None, 0, "bearer_env must be an environment variable NAME like CAMPAIGN_APP_TOKEN"
-    marks = timeline(model, slides, speed, end_hold_ms(tours, tour))
+    explicit = _tour_int(tours, tour, "end_hold_ms", L.END_HOLD_MIN_MS, L.END_HOLD_MAX_MS)
+    marks = timeline(model, slides, speed, explicit, end_beat_ms(tours, tour))
     duration = marks[-1]
     total_s = min(900, max(120, (duration + 90_000) // 1000))
     f = _yaml_str(FRAME)

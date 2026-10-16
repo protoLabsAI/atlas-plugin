@@ -53,9 +53,11 @@ Atlas is recordable without any coupling to a recorder:
   step label). The schedule is deterministic and waits for fonts to load. *Record* is autoplay plus
   large caption-style notes, with no toolbar, keyboard hints, toasts, cursor or hover states.
 - **The end of a take.** The last caption stays up for its reading time plus the tour's
-  `end_hold_ms` (optional, 0–30000, default 2500, linted). It then fades out over 400 ms and the clean
-  diagram holds a 2 s beat, and only then does `data-atlas-state` become `tour-done`, so an outro can
-  cut there. `atlas_record_script` predicts the duration from the same numbers.
+  `end_hold_ms` (optional, 0–30000, linted). By default that is 1.5 s, raised if needed so the
+  last caption is on screen for at least 5 s in all. It then fades out over 400 ms. The clean diagram
+  holds a beat of the tour's `end_beat_ms` (optional, 0–5000, default 1000, linted). Only then does
+  `data-atlas-state` become `tour-done`, so an outro can cut there. `atlas_record_script` predicts
+  the duration from the same numbers.
 - **Hooks.** The view's `<html>` carries `data-atlas-state` (`loading` → `ready` → `presenting` → `tour-done`),
   `data-atlas-slide` (1-based) and `data-atlas-view`, so a recorder can
   `wait_for: {selector: "[data-atlas-state=tour-done]", frame: "/plugins/atlas/view"}`.

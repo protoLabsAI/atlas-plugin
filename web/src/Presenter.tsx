@@ -4,7 +4,7 @@
 // diagram surface only: on a button / link / field, Tab + Enter + Space stay native (logic.mjs keyOwner).
 import type { LikeC4Model } from '@likec4/core/model'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { BEAT_MS, CAPTION_AWAY_MS, CAPTION_FADE_MS, END_HOLD_MS, keyOwner, presenterOwns, cycle, dynamicSteps, mdLight, presenterKey, slideDwellMs, stepDwellMs } from './logic.mjs'
+import { CAPTION_AWAY_MS, CAPTION_FADE_MS, endBeatFor, endHoldFor, keyOwner, presenterOwns, cycle, dynamicSteps, mdLight, presenterKey, slideDwellMs, stepDwellMs } from './logic.mjs'
 import { applyHighlight, clearHighlight } from './highlight'
 import { Button, Kbd } from '@protolabsai/ui/primitives'
 import { Select } from '@protolabsai/ui/forms'
@@ -13,7 +13,7 @@ import { getSpeed, onSpeed, stepSpeed } from './motion'
 import { Stage, type StageHandle } from './Stage'
 
 export type Slide = { view: string; focus?: string | string[]; edges?: string[]; step?: number; via?: string; note?: string; hold_ms?: number }
-export type Tour = { id: string; title: string; slides: Slide[]; auto?: boolean; end_hold_ms?: number }
+export type Tour = { id: string; title: string; slides: Slide[]; auto?: boolean; end_hold_ms?: number; end_beat_ms?: number }
 export type PresenterCmd = { seq: number; slide?: number; adhoc?: Slide }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
@@ -403,17 +403,20 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
       }
       await stage.current?.ready()
       await sleep(600)
+      let lastDwell = 0 // how long the last caption has been up when the end hold starts
       for (let i = first; i < tour.length; i++) {
         if (!live || manual.current) return
         await idle()
         if (i !== st.current.slide) await gotoSlide(i)
         await idle()
+        lastDwell = slideDwellMs(tour[i])
         await dwell(slideDwellMs(tour[i]))
         const v = data?.views?.[tour[i].view]
         if (v?._type === 'dynamic' && !tour[i].step) {
           for (const [n, e] of dynamicSteps(v).entries()) {
             if (!live || manual.current) return
             walkTo(n + 1)
+            lastDwell += stepDwellMs(e.label)
             await dwell(stepDwellMs(e.label))
           }
         }
@@ -421,10 +424,10 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
       if (!live || manual.current) return
       // the end: the last caption stays a little longer, fades, then a clean beat → tour-done
       const t = tours.find((x) => x.id === tourId) as any
-      await dwell(Number.isInteger(t?.end_hold_ms) ? t.end_hold_ms : END_HOLD_MS)
+      await dwell(endHoldFor(t, lastDwell))
       if (!live || manual.current) return
       if (record) setCaptionOut(true)
-      await dwell(CAPTION_FADE_MS + BEAT_MS)
+      await dwell(CAPTION_FADE_MS + endBeatFor(t))
       if (live && !manual.current) {
         setDone(true)
         onDone?.()

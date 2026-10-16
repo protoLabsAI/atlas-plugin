@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { slideDwellMs, stepDwellMs, words, parseDeepLink, END_HOLD_MS, CAPTION_FADE_MS, BEAT_MS, outroMs, toursFor, cleanTitle } from '../src/logic.mjs'
+import { slideDwellMs, stepDwellMs, words, parseDeepLink, END_HOLD_MS, FINAL_CAPTION_MIN_MS, CAPTION_FADE_MS, BEAT_MS, outroMs, endHoldFor, endBeatFor, toursFor, cleanTitle } from '../src/logic.mjs'
 
 test('dwell model (pinned to record.py — see tests/test_record.py)', () => {
   assert.equal(words('The **graph** owns `the` loop.'), 5)
@@ -10,7 +10,13 @@ test('dwell model (pinned to record.py — see tests/test_record.py)', () => {
   assert.equal(slideDwellMs({ note: 'w '.repeat(200) }), 15000, 'capped')
   assert.equal(stepDwellMs('POST chat'), 1800)
   assert.equal(stepDwellMs('one two three four five six'), 2560)
-  assert.deepEqual([END_HOLD_MS, CAPTION_FADE_MS, BEAT_MS, outroMs(), outroMs(0)], [2500, 400, 2000, 4900, 2400])
+  assert.deepEqual([END_HOLD_MS, FINAL_CAPTION_MIN_MS, CAPTION_FADE_MS, BEAT_MS, outroMs(), outroMs(0), outroMs(0, 0)], [1500, 5000, 400, 1000, 2900, 1400, 400])
+  // the default end hold tops the last caption up to 5 s on screen; an explicit one is taken as is
+  assert.equal(endHoldFor({}, 2500), 2500)
+  assert.equal(endHoldFor({}, 7900), 1500)
+  assert.equal(endHoldFor({ end_hold_ms: 0 }, 2500), 0)
+  assert.equal(endBeatFor({}), 1000)
+  assert.equal(endBeatFor({ end_beat_ms: 3000 }), 3000)
 })
 
 test('parseDeepLink', () => {
@@ -39,4 +45,6 @@ test('end_hold_ms survives toursFor (0–30000)', () => {
   const [t] = toursFor({ tours: [{ id: 't', end_hold_ms: 6000, slides: [{ view: 'index' }] }] }, data)
   assert.equal(t.end_hold_ms, 6000)
   assert.equal(toursFor({ tours: [{ id: 't', end_hold_ms: 99999, slides: [{ view: 'index' }] }] }, data)[0].end_hold_ms, undefined)
+  assert.equal(toursFor({ tours: [{ id: 't', end_beat_ms: 3000, slides: [{ view: 'index' }] }] }, data)[0].end_beat_ms, 3000)
+  assert.equal(toursFor({ tours: [{ id: 't', end_beat_ms: 5001, slides: [{ view: 'index' }] }] }, data)[0].end_beat_ms, undefined)
 })

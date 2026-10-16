@@ -25,10 +25,10 @@ TOURS_FILE = "atlas.tours.json"
 _STEP_ID = re.compile(r"^step-(\d+)")
 MAX_VIEW_NODES = 12
 HOLD_MIN_MS, HOLD_MAX_MS = 500, 60_000
-END_HOLD_MIN_MS, END_HOLD_MAX_MS = (
-    0,
-    30_000,
-)  # a tour's optional `end_hold_ms` (record: last caption)  # a tour slide's optional `hold_ms` (autoplay / recording dwell)
+# a tour slide's optional `hold_ms` (autoplay / recording dwell) is HOLD_*; a tour's optional
+# `end_hold_ms` (record: extra time on the last caption) and `end_beat_ms` (the clean beat after it)
+END_HOLD_MIN_MS, END_HOLD_MAX_MS = 0, 30_000
+END_BEAT_MIN_MS, END_BEAT_MAX_MS = 0, 5_000
 
 
 # ── model helpers ───────────────────────────────────────────────────────────────────────────
@@ -287,6 +287,17 @@ def _lint_tours(model: dict, tours: dict | None) -> list[dict]:
                     "rule": "tour-end-hold",
                     "tour": tid,
                     "message": f"tour {tid} end_hold_ms {eh!r} must be an integer between {END_HOLD_MIN_MS} and {END_HOLD_MAX_MS}",
+                }
+            )
+        eb = tour.get("end_beat_ms")
+        if eb is not None and (
+            isinstance(eb, bool) or not isinstance(eb, int) or not END_BEAT_MIN_MS <= eb <= END_BEAT_MAX_MS
+        ):
+            out.append(
+                {
+                    "rule": "tour-end-beat",
+                    "tour": tid,
+                    "message": f"tour {tid} end_beat_ms {eb!r} must be an integer between {END_BEAT_MIN_MS} and {END_BEAT_MAX_MS}",
                 }
             )
         slides = tour.get("slides")
