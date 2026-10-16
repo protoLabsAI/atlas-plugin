@@ -5,8 +5,8 @@ description: Author LikeC4 architecture models (.c4 files) for the Atlas plugin 
 
 # Writing LikeC4 for Atlas
 
-Verified against **likec4 1.60.0**. Every snippet here is an excerpt of a project under
-a project that passed `likec4 validate` when this skill was written.
+Verified against **likec4 1.60.0**. Every snippet here is an excerpt of a project that passed
+`likec4 validate` when this skill was written.
 LikeC4 is **not** Mermaid and **not** Structurizr. Don't carry those habits over (see *Common mistakes*).
 
 ## 1. Project layout
@@ -25,6 +25,10 @@ any of the top-level blocks `specification`, `model`, `views`, `global`, `deploy
 ```
 `name` is required. Useful extra key: `"implicitViews": true` auto-generates a scoped view
 for any element that lacks one, which Atlas does **not** rely on (see §8).
+
+Atlas reads **JSON configs only** (`likec4.config.json`; also `.likec4rc` / `.likec4.config.json`).
+Its engine can't load `likec4.config.ts` / `.js`. An `include` must stay inside the model folder
+and the file must be strict JSON (no comments or trailing commas), or Atlas refuses the model.
 
 ## 2. `specification`: declare everything before using it
 
@@ -301,7 +305,7 @@ Inside `extend X { }` you get X's scope, so siblings resolve by short name. `ext
       tool_loop -> subagents 'task()'
     }
 
-    session_store = store 'Session store' 'SQLite'
+    session_store = database 'Session store' 'SQLite'
 
     server.a2a_route -> graph.tool_loop 'submits message' {
       navigateTo chat_turn_flow
@@ -316,8 +320,10 @@ Inside `extend X { }` you get X's scope, so siblings resolve by short name. `ext
    `file:line message` (lines are 1-based).
 3. Fix the **first** error in each file first. Parse errors cascade into long `Expecting: one of these possible Token
    sequences…` lists, which Atlas truncates.
-4. Repeat until it says `Engine: OK` and `Lint: clean`. The lint findings matter too: `no-drilldown`, `code-link-missing`,
-   `sequence-nesting`, `busy-view`, `empty-view` and broken tour slides.
+4. Repeat until it says `Engine: OK` and `Lint: clean`. The lint findings matter too: `no-drilldown`,
+   `code-link-missing`, `code-link-outside`, `sequence-nesting`, `busy-view`, `empty-view`, and the tour checks
+   (`tour-slide`, `tour-step-skip`, `tour-duplicate`, `tour-empty`, `tour-end-hold`, `tour-end-beat`).
+   Each rule, with an example, is in the plugin's `docs/authoring.md`.
 5. While the model has errors, the open viewer keeps showing the last good version with an error banner, so the operator
    never sees a blank diagram mid-edit.
 
@@ -336,6 +342,7 @@ Atlas view while you talk, and you move it.
    - `focus=[a, b]` → highlight several; everything else dims and the camera eases to fit them.
    - `relations=[["a", "b"]]` → highlight the edges between two elements (or the shortest path).
    - `note="…"` → a short callout (≤ 280 chars, `**bold**` / `` `code` ``) pinned to the first highlight.
+     It needs a highlight: with a flow `step`, add `focus=` (a note on a bare step is refused).
    - Flows: `view="chat_turn_flow", step=3`, then `step="next"` / `"prev"` (relative to where the
      operator is). `atlas_describe(view=<dynamic view>)` lists every step as `from → to: label`.
 3. `show_code(project, path, line, end_line, note)` — the exact lines, in the console's code pane
@@ -347,7 +354,7 @@ Ids are element fqns (`atlas_describe`); a unique title also works, and a miss s
 `tour=` / `slide=` / `present=true` run a full presentation instead.
 
 **Example — "how does a chat turn reach the model?"**
-`atlas_show(view="chat_turn_flow", step=1, note="The operator's message enters through the console.")`
+`atlas_show(view="chat_turn_flow", step=1, focus="operator", note="The operator's message enters through the console.")`
 → one sentence → `atlas_show(step="next")` → … → at the model call:
 `atlas_show(relations=[["proto_agent.core.graph", "gateway"]], note="Every completion goes through the gateway.")`
 → `show_code(project="protoAgent", path="src/graph/llm.py", line=40, end_line=58, note="the streaming client")`.
