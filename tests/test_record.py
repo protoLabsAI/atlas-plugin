@@ -106,8 +106,10 @@ steps:
   - wait_for: {role: button, name: Atlas, timeout_ms: 60000}
   - click: {role: button, name: Atlas}
   - wait_for: {selector: '[data-atlas-state=ready]', frame: "/plugins/atlas/view", timeout_ms: 60000}
-  - click: {selector: "body, button[aria-label=\\"Toggle side panel\\"][aria-pressed=\\"true\\"]:not([disabled])", nth: last}
-  - wait_for: {selector: "button[aria-label=\\"Toggle side panel\\"][aria-pressed=\\"true\\"]:not([disabled])", state: hidden}
+  - click: {selector: "body, body:has(.pl-appshell__col--right iframe[src*=\\"/plugins/atlas/view\\"]) button[aria-label=\\"Toggle left panel\\"][aria-pressed=\\"true\\"]:not([disabled])", nth: last}
+  - wait_for: {selector: "body:has(.pl-appshell__col--right iframe[src*=\\"/plugins/atlas/view\\"]) button[aria-label=\\"Toggle left panel\\"][aria-pressed=\\"true\\"]:not([disabled])", state: hidden}
+  - click: {selector: "body, body:not(:has(.pl-appshell__col--right iframe[src*=\\"/plugins/atlas/view\\"])) button[aria-label=\\"Toggle side panel\\"][aria-pressed=\\"true\\"]:not([disabled])", nth: last}
+  - wait_for: {selector: "body:not(:has(.pl-appshell__col--right iframe[src*=\\"/plugins/atlas/view\\"])) button[aria-label=\\"Toggle side panel\\"][aria-pressed=\\"true\\"]:not([disabled])", state: hidden}
   - click: {selector: "body, button[aria-label=\\"Toggle bottom panel\\"][aria-pressed=\\"true\\"]:not([disabled])", nth: last}
   - wait_for: {selector: "button[aria-label=\\"Toggle bottom panel\\"][aria-pressed=\\"true\\"]:not([disabled])", state: hidden}
   - hold: 1000

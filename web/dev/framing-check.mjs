@@ -2,7 +2,7 @@
 // example tour at 1280×720 CSS, dsf 2, and asserts from DOM geometry that every visible node is
 // wholly inside the safe rect (below the top chrome, above the caption, inside the side margins),
 // nothing is partially clipped, and the content is centred (±5 %). Writes a contact sheet.
-//   PLAYWRIGHT_FROM=<dir> node dev/framing-check.mjs [--port 4720] [--sheet path] [--tour overview] [--dark]
+//   PLAYWRIGHT_FROM=<dir> node dev/framing-check.mjs [--port 4720] [--sheet path] [--tour overview] [--dark] [--size 1280x720]
 // Needs dev/server.mjs serving the example model (its default).
 import { createRequire } from 'node:module'
 import { readdirSync } from 'node:fs'
@@ -16,7 +16,7 @@ const { chromium } = createRequire(join(process.env.PLAYWRIGHT_FROM ?? '.', 'pac
 const cache = join(homedir(), 'Library/Caches/ms-playwright')
 const shell = readdirSync(cache).filter((d) => d.startsWith('chromium_headless_shell')).sort().pop()
 const browser = await chromium.launch({ executablePath: join(cache, shell, 'chrome-headless-shell-mac-arm64/chrome-headless-shell') })
-const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 2, colorScheme: process.argv.includes('--dark') ? 'dark' : 'light' })
+const page = await browser.newPage({ viewport: { width: +arg('--size', '1280x720').split('x')[0], height: +arg('--size', '1280x720').split('x')[1] }, deviceScaleFactor: 2, colorScheme: process.argv.includes('--dark') ? 'dark' : 'light' })
 const errs = []
 page.on('pageerror', (e) => errs.push(e.message))
 await page.goto(`${HOST}/plugins/atlas/view#tour=${TOUR}&slide=1&record=1&autoplay=0`)

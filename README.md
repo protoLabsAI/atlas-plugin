@@ -23,7 +23,8 @@ protoagent plugin install https://github.com/protoLabsAI/atlas-plugin
 ```
 
 Atlas ships **disabled**. Enable it in **Settings ▸ Plugins ▸ Atlas**; an **Atlas** button then
-appears in the console's rail.
+appears in the console's **right sidebar**, so chat stays open on the left while the agent drives
+the diagram. Drag the icon to the left rail if you prefer it there; the console remembers.
 
 ### Requirements
 

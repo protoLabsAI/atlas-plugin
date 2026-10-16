@@ -121,3 +121,14 @@ test('below the floor, a caption-named CONTAINER is framed whole (border and tit
   assert.ok(r.y >= S.y - 1 && r.y2 <= S.y + S.height + 1, `container cut: ${JSON.stringify(r)}`)
   assert.ok(leaves.every((x) => f.visible.includes(x.id)) && !f.visible.includes('far'))
 })
+
+test('a narrow panel (the 360 px right dock): a step / focus subject is never cut to make it legible', () => {
+  const root = fileURLToPath(new URL('../..', import.meta.url))
+  const out = JSON.parse(execFileSync(process.execPath, [`${root}vendor/atlas-engine.mjs`, 'export', `${root}examples/protoagent`], { maxBuffer: 64 << 20 }))
+  const v = out.model.views.chat_turn_flow
+  for (const c of [{ width: 360, height: 700 }, { width: 520, height: 700 }])
+    for (const e of v.edges.filter((x) => /^step-/.test(x.id))) {
+      const f = frameSlide(v, c, { top: 40, bottom: 160 }, { subject: [e.source, e.target] })
+      assert.ok(f.visible.includes(e.source) && f.visible.includes(e.target), `${c.width} ${e.id}: ${f.visible.join(',')}`)
+    }
+})

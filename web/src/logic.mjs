@@ -512,7 +512,7 @@ export function highlightPlan(view, focus = [], edges = []) {
  * note (it scrolls inside); `top` is always within the canvas.
  * → {hidden, left, top, side: 'above'|'below', arrowX, maxHeight}
  */
-export function calloutPlacement(node, vp, canvas, size, gap = 12, margin = 8) {
+export function calloutPlacement(node, vp, canvas, size, gap = 12, margin = 8, avoid = []) {
   const sx = node.x * vp.zoom + vp.x
   const sy = node.y * vp.zoom + vp.y
   const sw = node.width * vp.zoom
@@ -530,6 +530,26 @@ export function calloutPlacement(node, vp, canvas, size, gap = 12, margin = 8) {
     top = Math.round(sy + sh + gap)
   }
   top = Math.max(margin, Math.min(top, canvas.height - h - margin))
+  // the other highlighted nodes (`avoid`, flow boxes) stay visible: in a narrow panel the callout
+  // is nearly as wide as the canvas, so try below / above the anchor, then the canvas's own top
+  // or bottom edge (no arrow), whichever covers the least of them
+  const boxes = avoid.map((b) => ({ x: b.x * vp.zoom + vp.x, y: b.y * vp.zoom + vp.y, w: b.width * vp.zoom, h: b.height * vp.zoom }))
+  const cover = (t) => boxes.reduce((a, b) => a + Math.max(0, Math.min(left + size.width, b.x + b.w) - Math.max(left, b.x)) * Math.max(0, Math.min(t + h, b.y + b.h) - Math.max(t, b.y)), 0)
+  if (boxes.length && cover(top) > 0) {
+    const clampTop = (t) => Math.max(margin, Math.min(Math.round(t), canvas.height - h - margin))
+    const options = [
+      { side, top },
+      { side: side === 'above' ? 'below' : 'above', top: clampTop(side === 'above' ? sy + sh + gap : sy - gap - h) },
+      { side: 'edge', top: margin },
+      { side: 'edge', top: canvas.height - h - margin },
+    ].filter((o) => o.side === 'edge' || (o.side === 'above' ? o.top + h <= sy - gap + 0.5 : o.top >= sy + sh + gap - 0.5)) // (anchored: only while clear of the anchor)
+    let best = null
+    for (const o of options) {
+      const c = cover(o.top)
+      if (!best || c < best.c - 0.5) best = { ...o, c }
+    }
+    if (best) ((side = best.side), (top = best.top))
+  }
   const arrowX = Math.round(Math.max(12, Math.min(cx - left, size.width - 12)))
   return { hidden: offCanvas, left, top, side, arrowX, maxHeight }
 }

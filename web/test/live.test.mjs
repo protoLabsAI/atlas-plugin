@@ -153,3 +153,22 @@ test('live (user) zoom: settled only, hysteresis, fades', () => {
 test('textVisFor at the exact legible threshold stays shown (float noise)', () => {
   assert.equal(textVisFor(9 / (14 * 0.39), 0.39).hideEdgeLabels, false)
 })
+
+test('calloutPlacement keeps the other lit nodes clear: below the anchor, else a canvas edge', () => {
+  const vp = { x: 0, y: 0, zoom: 1 }
+  const canvas = { width: 360, height: 800 }
+  const size = { width: 340, height: 80 }
+  const anchor = { x: 40, y: 400, width: 100, height: 60 }
+  // a lit node right above the anchor: the callout goes below instead
+  const above = { x: 200, y: 320, width: 100, height: 60 }
+  const p = calloutPlacement(anchor, vp, canvas, size, 12, 8, [above])
+  assert.equal(p.side, 'below')
+  assert.ok(p.top >= 472)
+  // lit nodes above AND below: the canvas edge that covers none of them
+  const below = { x: 200, y: 480, width: 100, height: 60 }
+  const q = calloutPlacement(anchor, vp, canvas, size, 12, 8, [above, below])
+  assert.equal(q.side, 'edge')
+  assert.ok(q.top === 8 || q.top === 800 - 80 - 8)
+  // nothing to avoid: unchanged
+  assert.equal(calloutPlacement(anchor, vp, canvas, size).side, 'above')
+})

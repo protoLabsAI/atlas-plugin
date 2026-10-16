@@ -106,10 +106,19 @@ background: var(--pl-color-bg-raised); border: var(--pl-border-width) solid var(
 .notes-body { font-size: var(--pl-font-size-lg); margin: 4px 0 6px } .notes-body p { margin: 4px 0 }
 .notes .keys { font-size: var(--pl-font-size-2xs); color: var(--a-muted); opacity: .8 }
 @media (max-width: 640px) {
-.details { flex: 0 0 340px; max-width: 45%; overflow: auto; border-left: var(--pl-border-width) solid var(--a-border);
-background: var(--a-raised); position: relative }
-.d-body { padding: var(--pl-space-2) var(--pl-space-4) var(--pl-space-5) }
+.details { position: absolute; top: 0; right: 0; bottom: 0; z-index: 25; width: min(340px, 92%); max-width: none;
+box-shadow: var(--a-shadow) }
 .search input { width: 14ch } .viewpick { max-width: 16ch } .crumb button { max-width: 14ch }
+.hits { width: min(340px, calc(100vw - 16px)) }
+}
+@media (max-width: 520px) {
+.bar { gap: 6px; padding: 6px 8px }
+.crumbs { display: none }
+.viewpick { flex: 1 1 auto; max-width: none; min-width: 8ch }
+.search { flex: 0 1 13ch; min-width: 7ch; width: auto }
+.search input { width: 100%; min-width: 0 }
+.present-group { flex: 0 0 auto }
+.view-desc { display: none }
 }
 .callout { position: absolute; z-index: 12; max-width: min(320px, calc(100% - 16px)); padding: var(--pl-space-2) 28px var(--pl-space-2) var(--pl-space-3);
 font-size: var(--pl-font-size-sm); line-height: 1.45; background: var(--a-raised); color: var(--pl-color-fg); border: var(--pl-border-width) solid var(--a-accent);
@@ -120,6 +129,7 @@ display: flex; flex-direction: column }
 border: 1px solid var(--a-accent); transform: rotate(45deg) }
 .callout--above::after { bottom: -6px; border-top: 0; border-left: 0 }
 .callout--below::after { top: -6px; border-bottom: 0; border-right: 0 }
+.callout--edge::after { display: none }
 .callout__body p { margin: 0 } .callout__body p + p { margin-top: 4px }
 .callout__close { position: absolute; top: 4px; right: 4px }
 @media (prefers-reduced-motion: no-preference) { .callout { animation: atlas-callout-in var(--pl-motion-base) var(--pl-motion-ease) } }
@@ -149,7 +159,7 @@ border: 1px solid var(--a-accent); transform: rotate(45deg) }
     document.head.insertBefore(l, document.getElementById("atlas-css"));
     // The viewer bundle, BASE-prefixed (the page URL has no trailing slash, so no relative URLs).
     var s = document.createElement("script");
-    s.type = "module"; s.src = BASE + "/plugins/atlas/static/assets/atlas-DSPUGt6F.js";
+    s.type = "module"; s.src = BASE + "/plugins/atlas/static/assets/atlas-B8mXWCdw.js";
     s.onerror = function () {
       var b = document.getElementById("boot");
       if (b) b.textContent = "Atlas could not load its viewer bundle (" + s.src + ").";

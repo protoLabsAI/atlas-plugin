@@ -12,7 +12,15 @@ narrates it with you. To write or change the model itself, see [Authoring](autho
 
 ## Exploring
 
-Open **Atlas** from the console rail. The view loads the model's landing view (`index`) and
+Open **Atlas** from the console's right sidebar (its icon sits with Notes and Artifact). Chat stays
+open on the left, so you can ask the agent to show things and watch them appear. The sidebar is
+narrow by default (360 px): drag its edge to widen it. In a narrow panel the inspector opens over
+the diagram, and the toolbar drops the breadcrumb (the view picker names the view). To keep Atlas on
+the left instead, drag its icon to the left rail; the console remembers the layout. An install from
+before 0.2.3 keeps the rail it already had until you move it. A recording collapses whichever
+dock Atlas is not in, so the take fills the content area either way.
+
+The view loads the model's landing view (`index`) and
 keeps polling for changes every 2 seconds while it's visible, so edits to the model appear on
 their own. A reload keeps you on the view you were looking at, as long as it still exists.
 
