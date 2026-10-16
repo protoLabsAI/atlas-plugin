@@ -42,6 +42,10 @@ alongside the original url; `http(s)` links stay `{kind:"web", url}`.
              {"view": "chat_turn_flow", "step": 3, "note": "…"}]}]}
 ```
 `view` required; `focus` = element FQN to highlight; `step` = dynamic-view walkthrough step (1-based);
+`hold_ms` = autoplay/record dwell for the slide (500–60000; default from the note's length);
+a tour's `end_hold_ms` (0–30000; default 1500, topped up so the last caption is up ≥ 5 s in all) =
+extra time on the last caption before it fades; `end_beat_ms` (0–5000, default 1000) = the clean beat
+that then ends the take;
 `via` = node to zoom through when entering the view; `note` = speaker notes (markdown-light).
 With no tours file, the viewer derives an **auto-tour**: `index`, then each scoped view in model
 tree order, then each dynamic view.
@@ -59,8 +63,20 @@ Page + assets on the PUBLIC prefix (iframe navigations carry no bearer); data GA
 
 ## Bus
 
-`atlas.show` `{view, step?, focus?, tour?, slide?, present?: bool}` — emitted by the `atlas_show`
-tool; the open viewer navigates there (and enters presenter mode when `present`).
+`atlas.show` `{view, step?, focus?: [node id], edges?: [edge id], note?, tour?, slide?, present?: bool}`
+— emitted by `atlas_show` (fully resolved: the backend picks the view, maps elements onto view
+nodes, finds relation paths, turns `step: "next"` into a number). The open viewer zooms there, dims
+everything but the highlighted set, fits the camera to it and pins `note` as a callout (or enters
+presenter mode when `present`). `atlas.clear` `{}` drops highlights + callouts.
+
+`atlas.viewing` `{view, step, selected, focus, edges, note, mode, tour, slide}` — published by the
+viewer (debounced) whenever what the operator sees changes, every 30 s while visible (heartbeat),
+with `hidden: true` when the tab is hidden and `closed: true` on pagehide; each carries the viewer's
+random `instance` id. It is UNTRUSTED (any bearer holder can publish any topic): the backend keeps a
+sanitized copy per instance (known keys, typed, bounded; ids checked against the model when read),
+treats a view silent for 90 s as gone, and `atlas_describe(current=True)` reports the most recent
+open one — labelled as untrusted viewer data — and how many others are open. The viewer acts only
+on the exact topics `atlas.show` / `atlas.clear`.
 
 ## Agent tools
 
@@ -72,12 +88,19 @@ tool; the open viewer navigates there (and enters presenter mode when `present`)
     drops steps);
   - tours referencing unknown views / elements / out-of-range steps;
   - empty views.
-* `atlas_describe(view: str = "")` — no arg: the view tree (id, title, scoped-of, kind) + tours.
-  With a view: its nodes (fqn, title, kind, has drill-down) and edges, so the agent can talk about
-  and navigate the diagram.
-* `atlas_show(view, step=None, focus=None, tour=None, slide=None, present=False)` — check the target
-  exists, emit `atlas.show`, return a one-line confirmation. Writing the model is done with the
-  normal filesystem tools, guided by the skill.
+* `atlas_describe(view: str = "", current: bool = False)` — no arg: the view tree (id, title,
+  scoped-of, kind) + tours. With a view: its nodes (fqn, title, kind, has drill-down) and edges, or
+  a dynamic view's steps (`N. From → To: label [from.fqn → to.fqn]`). `current=True`: the operator's
+  latest `atlas.viewing`.
+* `atlas_show(view="", element=None, focus=None, relations=None, note=None, step=None, drill=False,
+  tour=None, slide=None, present=False)` — resolve + validate (see Bus), emit `atlas.show`, return a
+  one-line confirmation. Element ids resolve by fqn, else a unique title / last segment; misses list
+  close matches; a bad step lists every step. Writing the model is done with the normal filesystem
+  tools, guided by the skill.
+* `atlas_clear()` — emit `atlas.clear`.
+* `atlas_record_script(tour, base_url="", color_scheme="dark", viewport="1280x800", bearer_env="")` — a
+  Campaign Studio shot script recording the tour in record mode (see README *Recording a
+  walkthrough*); timing model in `record.py`, mirrored by `web/src/logic.mjs`.
 
 ## Node resolution
 

@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  keyOwner, presenterOwns,
   autoTour, toursFor, cleanTours, tourArray, normaliseLink, normaliseLinks, resolveProject, codeOpenMessage,
   presenterKey, cycle, slideForView, parseShow, parentView, viewChain, searchModel, viewForElement,
   keepView, viewOptions, mdLight, schemeForRgb, interpolateZoom, fitBox, errorFileRel, elementOrder, safeRelPath,
@@ -60,7 +61,7 @@ test('toursFor: API tours (doc or list) validated, else auto', () => {
   const doc = { tours: [{ id: 'o', title: 'Overview', slides: [{ view: 'index', focus: 'app', note: 'hi' }, { view: 'nope' }, { view: 'turn', step: 2 }, { view: 'turn', step: 9 }] }] }
   assert.equal(tourArray(doc).length, 1)
   const t = toursFor(doc, data)
-  assert.equal(t.length, 1)
+  assert.deepEqual(t.map((x) => x.id), ['o', 'auto'], 'the auto tour always follows')
   assert.deepEqual(t[0].slides.map((s) => [s.view, s.step, s.focus]), [['index', undefined, 'app'], ['turn', 2, undefined], ['turn', undefined, undefined]])
   assert.equal(toursFor(doc.tours, data)[0].id, 'o')
   const auto = toursFor(null, data)
@@ -125,8 +126,9 @@ test('presenterKey: the keyboard state machine', () => {
   assert.deepEqual(presenterKey('ArrowLeft', {}, { slide: 0, count: 5 }), { type: 'noop' })
   assert.deepEqual(presenterKey('Enter', {}, ctx), { type: 'drill' })
   assert.deepEqual(presenterKey('Escape', {}, ctx), { type: 'up' })
-  assert.deepEqual(presenterKey('Tab', {}, ctx), { type: 'focus', dir: 1 })
-  assert.deepEqual(presenterKey('Tab', { shiftKey: true }, ctx), { type: 'focus', dir: -1 })
+  assert.deepEqual(presenterKey('.', {}, ctx), { type: 'focus', dir: 1 })
+  assert.deepEqual(presenterKey(',', {}, ctx), { type: 'focus', dir: -1 })
+  assert.equal(presenterKey('Tab', {}, ctx), null, 'Tab is the browser\'s')
   assert.deepEqual(presenterKey('n', {}, ctx), { type: 'notes' })
   assert.deepEqual(presenterKey('F', {}, ctx), { type: 'fullscreen' })
   assert.deepEqual(presenterKey('1', {}, ctx), { type: 'goto', index: 0 })
@@ -157,8 +159,12 @@ test('cycle + slideForView', () => {
 
 test('parseShow (atlas.show bus payloads)', () => {
   const tours = toursFor(null, data)
-  assert.deepEqual(parseShow({ view: 'turn', step: 2 }, data, tours), { kind: 'view', view: 'turn', step: 2, focus: undefined, present: false })
-  assert.deepEqual(parseShow({ view: 'index', focus: 'app', present: true }, data, tours), { kind: 'view', view: 'index', step: undefined, focus: 'app', present: true })
+  assert.deepEqual(parseShow({ view: 'turn', step: 2 }, data, tours), { kind: 'view', view: 'turn', step: 2, focus: [], edges: [], note: undefined, present: false })
+  assert.deepEqual(parseShow({ view: 'index', focus: 'app', present: true }, data, tours), { kind: 'view', view: 'index', step: undefined, focus: ['app'], edges: [], note: undefined, present: true })
+  // live navigation: many foci, edges, a callout; unknown ids dropped; a note needs an anchor
+  const live = parseShow({ view: 'index', focus: ['app', 'ghost', 'gateway'], edges: ['nope'], note: ' Hi ' }, data, tours)
+  assert.deepEqual([live.focus, live.edges, live.note], [['app', 'gateway'], [], 'Hi'])
+  assert.equal(parseShow({ view: 'index', note: 'x' }, data, tours).note, undefined)
   assert.equal(parseShow({ view: 'nope' }, data, tours), null)
   assert.equal(parseShow({ view: 'turn', step: 7 }, data, tours).step, undefined)
   // slides are 1-based on the wire (atlas_show validates 1..len)
@@ -219,4 +225,61 @@ test('interpolateZoom endpoints + fitBox', () => {
   const vp = fitBox({ x: 0, y: 0, width: 100, height: 50 }, { x: 0, y: 0, width: 300, height: 300 }, 50)
   assert.equal(vp.zoom, 2)
   assert.deepEqual([vp.x, vp.y], [50, 100])
+})
+
+test('keyboard ownership: graph shortcuts never steal Tab / Enter / Space from controls', () => {
+  const el = (tag, extra = {}) => ({ tag, role: null, editable: false, chrome: false, ...extra })
+  // a button in the presenter chrome (Exit): native activation + Tab order
+  const onButton = keyOwner([el('BUTTON'), el('DIV', { chrome: true }), el('BODY')])
+  assert.equal(onButton, 'control')
+  for (const k of ['Enter', ' ', 'Tab', 'ArrowRight', '1', 'n']) assert.equal(presenterOwns(k, onButton), false, k)
+  assert.equal(presenterOwns('Escape', onButton), true, 'Escape still leaves (WCAG 2.1.2)')
+  // a link / code ref (role=button) inside the notes
+  assert.equal(keyOwner([el('CODE', { role: 'button' }), el('DIV'), el('ASIDE', { chrome: true })]), 'control')
+  assert.equal(keyOwner([el('A'), el('P')]), 'control')
+  // the tour <select>, an input, contenteditable: hands off entirely
+  for (const p of [[el('SELECT')], [el('INPUT')], [el('DIV', { editable: true })]]) {
+    assert.equal(keyOwner(p), 'editable')
+    assert.equal(presenterOwns('Escape', 'editable'), false)
+  }
+  // anywhere in the chrome, even a plain div
+  assert.equal(keyOwner([el('SPAN'), el('DIV', { chrome: true })]), 'control')
+  // the diagram (an xyflow node is role=group inside the shadow root) / the page body: ours
+  const onGraph = keyOwner([el('DIV', { role: 'group' }), el('DIV'), null, el('DIV'), el('BODY'), el('HTML')])
+  assert.equal(onGraph, 'surface')
+  for (const k of ['Enter', 'ArrowRight', '.', 'Escape']) assert.equal(presenterOwns(k, onGraph), true, k)
+  assert.equal(presenterOwns('Tab', onGraph), false)
+})
+
+test('cleanTours / toursFor keep a LIST focus (#5): node ids in the view, one left → a string', async () => {
+  const { cleanTours, toursFor } = await import('../src/logic.mjs')
+  const data = { views: { index: { id: 'index', nodes: [{ id: 'a' }, { id: 'b' }, { id: 'c' }], edges: [] } } }
+  const doc = { tours: [{ id: 't', slides: [{ view: 'index', focus: ['a', 'b'] }, { view: 'index', focus: ['a', 'nope'] }, { view: 'index', focus: ['nope'] }, { view: 'index', focus: 'c' }] }] }
+  const [t] = cleanTours(doc, data)
+  assert.deepEqual(t.slides.map((s) => s.focus), [['a', 'b'], 'a', undefined, 'c'])
+  assert.deepEqual(toursFor(doc, data)[0].slides[0].focus, ['a', 'b'])
+})
+
+test('rampedProgress: ease in, constant cruise, ease out — continuous, monotone, 0 → 1', async () => {
+  const { rampedProgress } = await import('../src/logic.mjs')
+  assert.equal(rampedProgress(0), 0)
+  assert.ok(Math.abs(rampedProgress(1) - 1) < 1e-9)
+  let prev = 0
+  const steps = []
+  for (let i = 1; i <= 100; i++) {
+    const v = rampedProgress(i / 100)
+    assert.ok(v >= prev - 1e-12)
+    steps.push(v - prev)
+    prev = v
+  }
+  // cruising: the middle 60 % moves at one constant speed (no slow-down between levels)
+  const mid = steps.slice(25, 75)
+  assert.ok(Math.max(...mid) - Math.min(...mid) < 1e-9)
+})
+
+test('interpolateZoom exposes its van Wijk length S (a level’s share of a dive)', async () => {
+  const { interpolateZoom } = await import('../src/logic.mjs')
+  const z = interpolateZoom(1.0)([0, 0, 1000], [0, 0, 250])
+  assert.ok(Math.abs(z.S - Math.log(4)) < 1e-9) // pure zoom: |ln(w1 / w0)| / rho
+  assert.ok(interpolateZoom(1.0)([0, 0, 1000], [500, 0, 250]).S > z.S)
 })

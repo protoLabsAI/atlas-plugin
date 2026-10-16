@@ -321,20 +321,61 @@ Inside `extend X { }` you get X's scope, so siblings resolve by short name. `ext
 5. While the model has errors, the open viewer keeps showing the last good version with an error banner, so the operator
    never sees a blank diagram mid-edit.
 
-## 9b. Explaining and presenting the diagram
+## 9b. Narrating the architecture live
 
-Use protoAgent's own surfaces. Don't paste diagrams or code into the chat.
+Use protoAgent's own surfaces. Don't paste diagrams or code into the chat — the operator watches the
+Atlas view while you talk, and you move it.
 
-- **Drive the view with `atlas_show`.** `atlas_show(view="proto_agent_core_detail", focus="proto_agent.core.graph")`
-  brings that view up in the console with the element highlighted. `step=` walks a dynamic view, and
-  `tour=` / `slide=` / `present=true` runs a presentation. Call `atlas_describe` first to get the view ids, element
-  ids and step numbers.
-- **Point at the code with `show_code`.** When you explain an element, take its code link from `atlas_describe` or the
-  `.c4` source. Get exact lines with `search_files` / `read_file`, then call core's
-  `show_code(project, path, line, end_line, note)`. The code opens in the console's code pane beside the diagram, with a
-  one-sentence note on why it matters. `path` is the link's path without the leading `/`.
-- A good explanation is: `atlas_show` the view, one or two sentences on the element's role, `show_code` its key lines,
-  then the next element or step. Keep each turn to one element or one step.
+**The loop** (one element or one step per turn):
+
+1. `atlas_describe(current=true)` — what the operator is looking at: view, walkthrough step,
+   **selected element**, highlights, presenter mode. Start from there ("the node you've selected…").
+2. `atlas_show(...)` — move the view and point:
+   - `element="proto_agent.core.graph"` → Atlas picks the smallest view containing it and highlights
+     it (`drill=true` opens its own drill-down instead). A list works too: the smallest view with all.
+   - `focus=[a, b]` → highlight several; everything else dims and the camera eases to fit them.
+   - `relations=[["a", "b"]]` → highlight the edges between two elements (or the shortest path).
+   - `note="…"` → a short callout (≤ 280 chars, `**bold**` / `` `code` ``) pinned to the first highlight.
+   - Flows: `view="chat_turn_flow", step=3`, then `step="next"` / `"prev"` (relative to where the
+     operator is). `atlas_describe(view=<dynamic view>)` lists every step as `from → to: label`.
+3. `show_code(project, path, line, end_line, note)` — the exact lines, in the console's code pane
+   beside the diagram (take the element's code link from `atlas_describe` or the `.c4` source; get
+   exact lines with `search_files` / `read_file`; `path` has no leading `/`).
+4. Next element / `step="next"`. `atlas_clear()` when you're done pointing.
+
+Ids are element fqns (`atlas_describe`); a unique title also works, and a miss suggests close matches.
+`tour=` / `slide=` / `present=true` run a full presentation instead.
+
+**Example — "how does a chat turn reach the model?"**
+`atlas_show(view="chat_turn_flow", step=1, note="The operator's message enters through the console.")`
+→ one sentence → `atlas_show(step="next")` → … → at the model call:
+`atlas_show(relations=[["proto_agent.core.graph", "gateway"]], note="Every completion goes through the gateway.")`
+→ `show_code(project="protoAgent", path="src/graph/llm.py", line=40, end_line=58, note="the streaming client")`.
+
+**Example — "what's this?" (operator clicked a node)**
+`atlas_describe(current=true)` → *Selected element: proto_agent.platform.scheduler (Scheduler)* →
+`atlas_show(element="proto_agent.platform.scheduler", focus=["proto_agent.platform.scheduler", "proto_agent.platform.state"], note="Jobs persist in SQLite.")`
+→ two sentences → `show_code(...)` on its entry point.
+
+## 9c. Recording a walkthrough
+
+To record a tour (for a launch video or the docs), call `atlas_record_script(tour="overview",
+base_url="http://localhost:7870")`. It returns a shot script (YAML) and the expected duration; hand
+the YAML to the recorder (Campaign Studio's `shotscript`) unchanged. Before you record:
+
+- Run `atlas_validate`. The script refuses a tour with broken slides.
+- Write notes for **reading**. Each slide stays up for its note's reading time (about 260 ms a word,
+  2.5–15 s) after the camera settles. Set `"hold_ms": 6000` on a slide that needs longer.
+- A slide that shows a whole dynamic view (no `step`) walks every step by itself, which is good
+  footage for a flow. Give every step a one-sentence `notes` — it becomes that step's caption
+  (without one the caption is `From → To: label`):
+  `console -> server 'POST /a2a' { notes 'The console posts it to the server.' }`
+  Prefer this to hand-picking a few `step` slides: skipping steps reads as skipping half the flow
+  (lint `tour-step-skip`).
+- Keep notes short (one or two sentences). In record mode they become large on-screen captions.
+- The last caption gets 1.5 s of extra reading time, and at least 5 s on screen in all. Then it
+  fades, and the diagram holds a clean 1 s beat before the take ends. Set `"end_hold_ms"`
+  (0–30000) on the tour to change the extra time, and `"end_beat_ms"` (0–5000) to change the beat.
 
 ## 10. Common mistakes (real 1.60.0 errors)
 

@@ -92,7 +92,7 @@ def test_describe_view(stub):
     assert "a — A (system, drill-down: a_detail)" in out
     assert "a → d: calls" in out
     flow = describe_text(stub, "flow")
-    assert "1. a → d: ask" in flow and "2. d → a: answer" in flow
+    assert "1. A → D: ask [a → d]" in flow and "2. D → A: answer [d → a]" in flow
     assert "Unknown view 'zz'" in describe_text(stub, "zz")
 
 
@@ -105,12 +105,15 @@ def test_describe_without_tours_mentions_the_auto_tour(tmp_path):
     "kw,why",
     [
         ({"view": "nope"}, "unknown view 'nope'"),
-        ({"view": "index", "focus": "ghost"}, "focus 'ghost' is not an element"),
-        ({"view": "flow", "step": 9}, "step 9 is out of range for flow (1–2)"),
-        ({"view": "index", "step": 1}, "not a dynamic view"),
+        ({"view": "index", "focus": "ghost"}, "unknown element 'ghost'"),
+        (
+            {"view": "flow", "step": 9},
+            "step 9 is out of range (1–2). flow has 2 step(s):\n  1. A → D: ask\n  2. D → A: answer",
+        ),
+        ({"view": "index", "step": 1}, "not a dynamic (walkthrough) view"),
         ({"tour": "nope"}, "Unknown tour 'nope'"),
         ({"tour": "intro", "slide": 3}, "slide 3 is out of range for tour intro (1–2)"),
-        ({}, "Give a `view`"),
+        ({}, "Give a `view`, an `element`"),
     ],
 )
 def test_show_rejects_bad_targets(stub, kw, why):
@@ -120,7 +123,7 @@ def test_show_rejects_bad_targets(stub, kw, why):
 
 def test_show_targets(stub):
     assert show_target(stub, view="flow", step=2, present=True)[0] == {"view": "flow", "step": 2, "present": True}
-    assert show_target(stub, view="index", focus="a")[0] == {"view": "index", "focus": "a", "present": False}
+    assert show_target(stub, view="index", focus="a")[0] == {"view": "index", "focus": ["a"], "present": False}
     assert show_target(stub, tour="intro", slide=2)[0] == {"tour": "intro", "slide": 2, "present": False}
     assert show_target(stub, tour="auto", slide=3)[0]["slide"] == 3
 
@@ -128,7 +131,7 @@ def test_show_targets(stub):
 async def test_atlas_show_emits_and_navigates(stub, registry):
     tools = {t.name: t for t in build_tools(stub, registry)}
     out = await tools["atlas_show"].ainvoke({"view": "flow", "step": 1, "present": True})
-    assert out == "Showing view flow step 1 in Atlas (presenter mode)."
+    assert out == "Showing view flow (Flow), step 1 of 2 — A → D: ask in Atlas (presenter mode)."
     assert registry.emitted == [("atlas.show", {"view": "flow", "step": 1, "present": True})]
     assert registry.navigations == ["atlas"]
     bad = await tools["atlas_show"].ainvoke({"view": "nope"})
@@ -150,9 +153,12 @@ async def test_tools_against_the_real_example(project, registry):
     # the example links into files the tmp project doesn't have → lint says so
     assert "[code-link-missing]" in report
     tree = await tools["atlas_describe"].ainvoke({})
-    assert "proto_agent_detail" in tree and "overview — protoAgent in 5 minutes (8 slides)" in tree
+    assert "proto_agent_detail" in tree and "overview — protoAgent in 85 seconds (8 slides)" in tree
     flow = await tools["atlas_describe"].ainvoke({"view": "chat_turn_flow"})
-    assert "9. proto_agent.interfaces.server.chat → proto_agent.interfaces.console: SSE stream" in flow
+    assert (
+        "10. Turn streaming → Console: SSE [proto_agent.interfaces.server.turn_stream → proto_agent.interfaces.console]"
+        in flow
+    )
     shown = await tools["atlas_show"].ainvoke({"tour": "overview", "slide": 8, "present": True})
     assert shown.startswith("Showing tour overview slide 8")
 

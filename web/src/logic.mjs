@@ -81,6 +81,22 @@ export function dynamicSteps(view) {
 
 const edgeLabel = (e) => (e?.label ?? e?.labelBBox?.text ?? '').toString().trim()
 
+/** A step's own notes (LikeC4 `notes` on a dynamic step: a string, or {txt} / {md}), or '' */
+export function stepNotes(e) {
+  const n = e?.notes
+  return (typeof n === 'string' ? n : (n?.md ?? n?.txt ?? '')).toString().trim()
+}
+
+/** The caption a walked step gets: its notes, else `From → To: label` (titles from the view). */
+export function stepCaption(view, e) {
+  const own = stepNotes(e)
+  if (own) return own
+  const title = (id) => (view?.nodes ?? []).find((n) => n.id === id)?.title ?? String(id ?? '').split('.').pop()
+  const label = edgeLabel(e)
+  // a backward step (`a <- b`) is drawn b → a: LikeC4 exports it with source / target as walked
+  return `${title(e?.source)} → ${title(e?.target)}${label ? `: ${label}` : ''}`
+}
+
 // ---------------------------------------------------------------- tours
 
 /**
@@ -119,6 +135,12 @@ export function tourArray(tours) {
   return []
 }
 
+/** A title safe to show + match as a menu item name: control chars, NEL and the Unicode
+ *  line / paragraph separators become spaces (record.py's clean_title does the same). */
+export function cleanTitle(t) {
+  return String(t ?? '').replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, ' ').replace(/\s+/g, ' ').trim() || 'Tour'
+}
+
 /** Validate API tours against the model: drops unknown views, bad steps, unknown focus. */
 export function cleanTours(tours, data) {
   const out = []
@@ -130,11 +152,18 @@ export function cleanTours(tours, data) {
       if (!v) continue
       const slide = { view: s.view, note: typeof s.note === 'string' ? s.note : '' }
       if (Number.isInteger(s.step) && s.step >= 1 && s.step <= dynamicSteps(v).length) slide.step = s.step
-      if (typeof s.focus === 'string' && v.nodes?.some((n) => n.id === s.focus)) slide.focus = s.focus
+      // focus: one element or several (each must be a node in the view; one left → a string)
+      const focus = (Array.isArray(s.focus) ? s.focus : [s.focus]).filter((f) => typeof f === 'string' && v.nodes?.some((n) => n.id === f))
+      if (focus.length) slide.focus = focus.length === 1 ? focus[0] : [...new Set(focus)]
       if (typeof s.via === 'string') slide.via = s.via
+      if (Number.isInteger(s.hold_ms) && s.hold_ms >= 500 && s.hold_ms <= 60000) slide.hold_ms = s.hold_ms
       slides.push(slide)
     }
-    if (slides.length) out.push({ id: String(t.id ?? `tour${out.length + 1}`), title: String(t.title ?? t.id ?? 'Tour'), slides })
+    if (!slides.length) continue
+    const tour = { id: String(t.id ?? `tour${out.length + 1}`), title: cleanTitle(t.title ?? t.id ?? 'Tour'), slides }
+    if (Number.isInteger(t.end_hold_ms) && t.end_hold_ms >= 0 && t.end_hold_ms <= 30000) tour.end_hold_ms = t.end_hold_ms
+    if (Number.isInteger(t.end_beat_ms) && t.end_beat_ms >= 0 && t.end_beat_ms <= 5000) tour.end_beat_ms = t.end_beat_ms
+    out.push(tour)
   }
   return out
 }
@@ -142,9 +171,10 @@ export function cleanTours(tours, data) {
 /** API tours (validated) or the auto-tour, always ≥ 1 tour when the model has views. */
 export function toursFor(apiTours, data) {
   const list = cleanTours(apiTours, data)
-  if (list.length) return list
+  // the auto tour is ALWAYS there (atlas_show / atlas_record_script accept tour="auto")
   const auto = autoTour(data)
-  return auto.length ? [{ id: 'auto', title: 'Overview', slides: auto, auto: true }] : []
+  if (auto.length && !list.some((t) => t.id === 'auto')) list.push({ id: 'auto', title: 'Overview', slides: auto, auto: true })
+  return list
 }
 
 // ---------------------------------------------------------------- links
@@ -374,8 +404,13 @@ export function presenterKey(key, mods = {}, ctx = { slide: 0, count: 0 }) {
     case 'Escape':
     case 'Backspace':
       return { type: 'up' }
-    case 'Tab':
-      return { type: 'focus', dir: mods.shiftKey ? -1 : 1 }
+    // node focus: `.` next / `,` previous — Tab stays the browser's (WCAG 2.1.1 / 2.4.3)
+    case '.':
+    case '>':
+      return { type: 'focus', dir: 1 }
+    case ',':
+    case '<':
+      return { type: 'focus', dir: -1 }
     case 'n':
     case 'N':
       return { type: 'notes' }
@@ -422,8 +457,121 @@ export function parseShow(d, data, tours) {
   if (typeof d.view !== 'string' || !data.views?.[d.view]) return null
   const v = data.views[d.view]
   const step = Number.isInteger(d.step) && d.step >= 1 && d.step <= dynamicSteps(v).length ? d.step : undefined
-  const focus = typeof d.focus === 'string' && v.nodes?.some((n) => n.id === d.focus) ? d.focus : undefined
-  return { kind: 'view', view: d.view, step, focus, present }
+  const ids = new Set((v.nodes ?? []).map((n) => n.id))
+  const focus = (Array.isArray(d.focus) ? d.focus : typeof d.focus === 'string' ? [d.focus] : []).filter((f) => typeof f === 'string' && ids.has(f))
+  const eids = new Set((v.edges ?? []).map((e) => e.id))
+  const edges = (Array.isArray(d.edges) ? d.edges : []).filter((e) => typeof e === 'string' && eids.has(e))
+  const note = typeof d.note === 'string' && d.note.trim() && (focus.length || edges.length) ? d.note.trim().slice(0, 280) : undefined
+  return { kind: 'view', view: d.view, step, focus, edges, note, present }
+}
+
+// ---------------------------------------------------------------- live highlights
+
+/**
+ * What to light up in a view: the focused nodes + every edge's endpoints stay lit (and the
+ * compounds containing them, so their context reads), the rest dims; `bounds` is the box the
+ * camera fits. → {lit: Set<nodeId>, active: Set<edgeId>, dimNodes: [], dimEdges: [], bounds|null}
+ */
+export function highlightPlan(view, focus = [], edges = []) {
+  const nodes = view?.nodes ?? []
+  const byId = new Map(nodes.map((n) => [n.id, n]))
+  const allEdges = view?.edges ?? []
+  const active = new Set(edges.filter((e) => allEdges.some((x) => x.id === e)))
+  const core = new Set(focus.filter((f) => byId.has(f)))
+  for (const e of allEdges) if (active.has(e.id)) (core.add(e.source), core.add(e.target))
+  const lit = new Set(core)
+  for (const id of core) {
+    let p = byId.get(id)?.parent
+    while (p && byId.has(p)) {
+      lit.add(p)
+      p = byId.get(p)?.parent
+    }
+  }
+  let bounds = null
+  for (const id of core) {
+    const n = byId.get(id)
+    if (!n || !(n.width > 0)) continue
+    const b = { x: n.x, y: n.y, x2: n.x + n.width, y2: n.y + n.height }
+    bounds = bounds ? { x: Math.min(bounds.x, b.x), y: Math.min(bounds.y, b.y), x2: Math.max(bounds.x2, b.x2), y2: Math.max(bounds.y2, b.y2) } : b
+  }
+  return {
+    lit,
+    active,
+    dimNodes: nodes.map((n) => n.id).filter((id) => !lit.has(id)),
+    dimEdges: allEdges.map((e) => e.id).filter((id) => !active.has(id)),
+    bounds: bounds && { x: bounds.x, y: bounds.y, width: bounds.x2 - bounds.x, height: bounds.y2 - bounds.y },
+    empty: core.size === 0,
+  }
+}
+
+/**
+ * Where an on-canvas callout goes: above the node's on-screen box, centred and clamped to the
+ * canvas; below when there's no room above. `node` in flow coords, `vp` = {x, y, zoom},
+ * `canvas`/`size` = {width, height}. Policy when the anchor leaves the canvas: HIDE (and come
+ * back when it returns) — never pinned to an edge pointing at nothing. `maxHeight` bounds a tall
+ * note (it scrolls inside); `top` is always within the canvas.
+ * → {hidden, left, top, side: 'above'|'below', arrowX, maxHeight}
+ */
+export function calloutPlacement(node, vp, canvas, size, gap = 12, margin = 8) {
+  const sx = node.x * vp.zoom + vp.x
+  const sy = node.y * vp.zoom + vp.y
+  const sw = node.width * vp.zoom
+  const sh = node.height * vp.zoom
+  const maxHeight = Math.max(48, Math.round(canvas.height - 2 * margin))
+  const h = Math.min(size.height, maxHeight)
+  const offCanvas = sx + sw < 0 || sy + sh < 0 || sx > canvas.width || sy > canvas.height
+  const cx = Math.min(Math.max(sx + sw / 2, 0), canvas.width)
+  let left = Math.round(cx - size.width / 2)
+  left = Math.max(margin, Math.min(left, canvas.width - size.width - margin))
+  let side = 'above'
+  let top = Math.round(sy - gap - h)
+  if (top < margin) {
+    side = 'below'
+    top = Math.round(sy + sh + gap)
+  }
+  top = Math.max(margin, Math.min(top, canvas.height - h - margin))
+  const arrowX = Math.round(Math.max(12, Math.min(cx - left, size.width - 12)))
+  return { hidden: offCanvas, left, top, side, arrowX, maxHeight }
+}
+
+/** The `atlas.viewing` payload — what the operator sees right now. */
+export function viewingPayload({ mode, view, step, selected, highlight, tour, slide }) {
+  const out = { mode: mode === 'present' ? 'present' : 'explore', view: view ?? null, step: Number.isInteger(step) && step > 0 ? step : null, selected: selected ?? null }
+  out.focus = highlight?.focus?.length ? [...highlight.focus] : []
+  out.edges = highlight?.edges?.length ? [...highlight.edges] : []
+  out.note = highlight?.note ?? null
+  if (out.mode === 'present') ((out.tour = tour ?? null), (out.slide = Number.isInteger(slide) ? slide + 1 : null))
+  return out
+}
+
+/**
+ * "Ask about this" — the chat draft for an element (protoagent:chat:compose). Includes the
+ * element's code-link paths and, on a dynamic view, the current step.
+ */
+export function askPrompt(data, { view, fqn, step } = {}) {
+  const v = data?.views?.[view]
+  const el = fqn ? data?.elements?.[fqn] : null
+  const vt = v?.title || view || 'Atlas'
+  const title = (f) => data?.elements?.[f]?.title || f
+  let text
+  if (el) text = `In the Atlas view "${vt}", tell me about ${el.title || fqn} (${fqn}) — how it works and where it lives in the code.`
+  else text = `In the Atlas view "${vt}", walk me through what this view shows and where it lives in the code.`
+  if (v?._type === 'dynamic' && Number.isInteger(step) && step > 0) {
+    const e = dynamicSteps(v)[step - 1]
+    if (e) text += ` We're at step ${step}: ${title(e.source)} → ${title(e.target)}${e.label ? ` "${e.label}"` : ''}.`
+  }
+  const paths = el ? normaliseLinks(el.links).filter((l) => l.kind === 'code').map((l) => l.path + (l.line ? `:${l.line}` : '')) : []
+  if (paths.length) text += ` Code links: ${[...new Set(paths)].join(', ')}.`
+  return text.length > 1200 ? text.slice(0, 1199) + '…' : text
+}
+
+/** Does the host support protoagent:chat:compose? Only when its version is KNOWN to be ≥ 0.206.0
+ *  (the first release that can carry core #4243) — an unknown / unparseable version hides it. */
+export function hostSupportsCompose(version) {
+  const m = /^v?(\d+)\.(\d+)\.(\d+)/.exec(String(version ?? ''))
+  if (!m) return false
+  const [a, b] = [Number(m[1]), Number(m[2])]
+  return a > 0 || b >= 206
 }
 
 // ---------------------------------------------------------------- text + theme
@@ -486,6 +634,16 @@ export function schemeForRgb(rgb) {
 // ---------------------------------------------------------------- camera math
 
 /** van Wijk & Nuij smooth zoom between `[cx, cy, width]` views (same as d3.interpolateZoom.rho). */
+/** A trapezoid velocity profile over p ∈ [0,1]: ease in over the first `r`, constant speed, ease out
+ * over the last `r` — a multi-level dive keeps its pace through the levels. */
+export function rampedProgress(p, r = 0.2) {
+  const q = Math.min(1, Math.max(0, p))
+  const v = 1 / (1 - r) // the cruising speed (the ramps cover r/2 of the distance each)
+  if (q < r) return (v * q * q) / (2 * r)
+  if (q > 1 - r) return 1 - (v * (1 - q) * (1 - q)) / (2 * r)
+  return v * (q - r / 2)
+}
+
 export function interpolateZoom(rho = Math.SQRT2) {
   const rho2 = rho * rho
   const rho4 = rho2 * rho2
@@ -497,19 +655,23 @@ export function interpolateZoom(rho = Math.SQRT2) {
     const d2 = dx * dx + dy * dy
     if (d2 < 1e-12) {
       const S = Math.log(w1 / w0) / rho
-      return (t) => [ux0 + t * dx, uy0 + t * dy, w0 * Math.exp(rho * t * S)]
+      return Object.assign((t) => [ux0 + t * dx, uy0 + t * dy, w0 * Math.exp(rho * t * S)], { S: Math.abs(S) })
     }
     const d1 = Math.sqrt(d2)
     const b0 = (w1 * w1 - w0 * w0 + rho4 * d2) / (2 * w0 * rho2 * d1)
     const b1 = (w1 * w1 - w0 * w0 - rho4 * d2) / (2 * w1 * rho2 * d1)
     const r0 = Math.log(Math.sqrt(b0 * b0 + 1) - b0)
     const S = (Math.log(Math.sqrt(b1 * b1 + 1) - b1) - r0) / rho
-    return (t) => {
-      const s = t * S
-      const c0 = Math.cosh(r0)
-      const u = (w0 / (rho2 * d1)) * (c0 * Math.tanh(rho * s + r0) - Math.sinh(r0))
-      return [ux0 + u * dx, uy0 + u * dy, (w0 * c0) / Math.cosh(rho * s + r0)]
-    }
+    // `.S`: the path's length in van Wijk's metric (log-zoom + pan) — even perceived speed ∝ S
+    return Object.assign(
+      (t) => {
+        const s = t * S
+        const c0 = Math.cosh(r0)
+        const u = (w0 / (rho2 * d1)) * (c0 * Math.tanh(rho * s + r0) - Math.sinh(r0))
+        return [ux0 + u * dx, uy0 + u * dy, (w0 * c0) / Math.cosh(rho * s + r0)]
+      },
+      { S: Math.abs(S) },
+    )
   }
 }
 
@@ -546,8 +708,9 @@ export function parentOriginOf({ ancestorOrigins, referrer, origin }) {
 }
 
 /** Context-menu items for a node (`protoagent:contextmenu:open`). Ids carry no dots (the host namespaces them). */
-export function nodeMenuItems({ hasCode, paneOn, canDrill, canPresent }) {
+export function nodeMenuItems({ hasCode, paneOn, canDrill, canPresent, canAsk }) {
   const items = []
+  if (canAsk) items.push({ id: 'ask', label: 'Ask about this' }, { divider: true })
   if (hasCode) {
     if (paneOn !== false) items.push({ id: 'view', label: 'View code' })
     items.push({ id: 'editor', label: 'Open in editor' })
@@ -565,4 +728,202 @@ export function nodeMenuItems({ hasCode, paneOn, canDrill, canPresent }) {
 export function codeRoute(mods, paneOn) {
   if (mods && (mods.metaKey || mods.ctrlKey)) return 'editor'
   return paneOn === false ? 'editor' : 'pane'
+}
+
+// ---------------------------------------------------------------- autoplay / recording
+// The autoplay schedule. MUST match record.py (SLIDE_* / STEP_* / END_HOLD_MS / FINAL_CAPTION_MIN_MS / CAPTION_FADE_MS / BEAT_MS) — the
+// backend's shot script waits for the same timeline.
+export const MIN_SLIDE_MS = 2500
+export const SLIDE_BASE_MS = 1200
+export const PER_WORD_MS = 260
+export const MAX_SLIDE_MS = 15000
+// a walked step is read like a slide: its caption's reading time, at least 2.5 s
+export const MIN_STEP_MS = 2500
+export const STEP_BASE_MS = 1200
+// the end of a take: the last caption stays `end_hold_ms` longer (tour field, default 1.5 s — and by
+// default never less than FINAL_CAPTION_MIN_MS on screen in all), then fades (400 ms), then the
+// clean diagram holds `end_beat_ms` (tour field, default 1 s) — then tour-done
+export const END_HOLD_MS = 1500
+export const FINAL_CAPTION_MIN_MS = 5000
+export const CAPTION_FADE_MS = 400
+/** a slide change: the outgoing caption fades out over this as the camera starts */
+export const CAPTION_AWAY_MS = 250
+export const BEAT_MS = 1000
+export const outroMs = (endHold = END_HOLD_MS, beat = BEAT_MS) => endHold + CAPTION_FADE_MS + beat
+/** the end hold a tour gets: its own `end_hold_ms`, else the default, topped up so the last caption
+ * (on screen for `lastDwell` already) stays up FINAL_CAPTION_MIN_MS in all */
+export const endHoldFor = (tour, lastDwell) =>
+  Number.isInteger(tour?.end_hold_ms) ? tour.end_hold_ms : Math.max(END_HOLD_MS, FINAL_CAPTION_MIN_MS - lastDwell)
+export const endBeatFor = (tour) => (Number.isInteger(tour?.end_beat_ms) ? tour.end_beat_ms : BEAT_MS)
+
+export const words = (text) => (String(text ?? '').replace(/[*`_[\]()]/g, ' ').match(/\S+/g) ?? []).length
+
+/** How long a slide stays up (after its camera settles): `hold_ms`, else from the note's length. */
+export function slideDwellMs(slide) {
+  const hold = slide?.hold_ms
+  if (Number.isInteger(hold) && hold > 0) return hold
+  return Math.min(MAX_SLIDE_MS, Math.max(MIN_SLIDE_MS, SLIDE_BASE_MS + words(slide?.note) * PER_WORD_MS))
+}
+
+/** How long one walkthrough step of a whole-dynamic-view slide stays up. */
+export function stepDwellMs(caption) {
+  return Math.min(MAX_SLIDE_MS, Math.max(MIN_STEP_MS, STEP_BASE_MS + words(caption) * PER_WORD_MS))
+}
+
+/**
+ * A deep link in the page's hash: `#tour=<id>&slide=<n>&present=1&autoplay=1&record=1` or
+ * `#view=<id>&focus=<fqn>[,<fqn>]&step=<n>`. → {tour?, slide?, present, autoplay, record, view?, focus[], step?} | null
+ */
+export function parseDeepLink(hash) {
+  const raw = String(hash ?? '').replace(/^#/, '')
+  if (!raw || !/(^|&)(tour|view)=/.test(raw)) return null
+  const q = new URLSearchParams(raw)
+  const flag = (k) => ['1', 'true', 'yes', ''].includes(q.get(k) ?? 'no')
+  const int = (k) => (/^\d+$/.test(q.get(k) ?? '') ? Number(q.get(k)) : undefined)
+  // record implies autoplay unless `autoplay=0` asks to step it by hand (framing checks)
+  const autoplay = q.has('autoplay') ? flag('autoplay') : flag('record')
+  const out = { present: flag('present') || autoplay || flag('record'), autoplay, record: flag('record') }
+  if (q.get('tour')) ((out.tour = q.get('tour')), (out.slide = int('slide')))
+  if (q.get('view')) ((out.view = q.get('view')), (out.step = int('step')))
+  out.focus = (q.get('focus') ?? '').split(',').map((s) => s.trim()).filter(Boolean)
+  return out
+}
+
+/** The bus topics the viewer acts on — exactly these (registry.emit namespaces a plugin's emits
+ *  to `<plugin>.<event>`; any other plugin's `x.atlas.show` is ignored). */
+export const SHOW_TOPIC = 'atlas.show'
+export const CLEAR_TOPIC = 'atlas.clear'
+
+/** Explore-mode actions for a parsed `atlas.show` view request: the step to walk to (if any) and
+ *  the highlight/callout to apply — AFTER the step settles when both are given. */
+export function exploreShowPlan(req) {
+  const hasHl = (req?.focus?.length ?? 0) > 0 || (req?.edges?.length ?? 0) > 0
+  const highlight = hasHl ? { view: req.view, focus: [...req.focus], edges: [...req.edges], note: req.note } : null
+  if (req?.step) return { step: req.step, highlight, fit: false }
+  return { step: undefined, highlight, fit: !highlight }
+}
+
+// ---------------------------------------------------------------- legibility (present / record)
+// LikeC4's base sizes (styles: --font-sizes-likec4-md, description × .74, edge label 14px)
+export const LIKEC4_TITLE_PX = 19.2
+export const LIKEC4_DESC_RATIO = 0.74
+export const LIKEC4_EDGE_PX = 14
+export const LEGIBLE = { title: 12, desc: 9, edge: 9, kMax: 1.6, keMax: 2, floor: 9 }
+
+/**
+ * How to frame a view so its text stays legible on screen (CSS px), for present / record:
+ * `k` scales titles / compound titles / edge labels inside their (fixed) boxes, up to `kMax`;
+ * when even that leaves titles under `title` px at the whole-view fit, the camera frames the
+ * densest window at the minimum legible zoom instead of the whole view (present/record only).
+ * → {k, zoom, box (flow coords to fit), cropped}
+ */
+export function legibleFrame(view, stage, pad = 56, t = LEGIBLE, kFixed) {
+  const b = view?.bounds
+  if (!b || !(b.width > 0) || !(stage.width > 0)) return { k: 1, ke: 1, zoom: 1, box: b, cropped: false }
+  const avail = { w: Math.max(1, stage.width - 2 * pad), h: Math.max(1, stage.height - 2 * pad) }
+  const zFit = Math.min(avail.w / b.width, avail.h / b.height)
+  // `kFixed`: a layer whose text scale is already set (it never changes under the viewer)
+  const k = kFixed ?? Math.min(t.kMax, Math.max(1, t.title / (LIKEC4_TITLE_PX * zFit)))
+  const zMin = t.title / (LIKEC4_TITLE_PX * k)
+  // edge labels get their own scale (they sit on the lines, not in fixed boxes)
+  const keFor = (z) => Math.min(t.keMax, Math.max(1, t.edge / (LIKEC4_EDGE_PX * z)))
+  if (zFit >= zMin - 1e-6) return { k, ke: keFor(zFit), zoom: zFit, box: b, cropped: false }
+  // the densest window of the size that zMin can show, centred on a node, clamped into the view
+  const ww = avail.w / zMin
+  const wh = avail.h / zMin
+  const leaves = (view.nodes ?? []).filter((n) => !(n.children?.length) && n.width > 0)
+  const centres = leaves.map((n) => [n.x + n.width / 2, n.y + n.height / 2])
+  // inside the view along an axis it overflows; centred on the view along an axis it fits
+  const clampX = (x) => (ww >= b.width ? b.x + (b.width - ww) / 2 : Math.min(Math.max(x, b.x), b.x + b.width - ww))
+  const clampY = (y) => (wh >= b.height ? b.y + (b.height - wh) / 2 : Math.min(Math.max(y, b.y), b.y + b.height - wh))
+  const mid = [b.x + b.width / 2, b.y + b.height / 2]
+  let best = null
+  for (const [cx, cy] of centres.length ? centres : [mid]) {
+    const x = clampX(cx - ww / 2)
+    const y = clampY(cy - wh / 2)
+    const count = centres.filter(([px, py]) => px >= x && px <= x + ww && py >= y && py <= y + wh).length
+    const dist = Math.hypot(x + ww / 2 - mid[0], y + wh / 2 - mid[1])
+    if (!best || count > best.count || (count === best.count && dist < best.dist)) best = { x, y, count, dist }
+  }
+  return { k, ke: keFor(zMin), zoom: zMin, box: { x: best.x, y: best.y, width: ww, height: wh }, cropped: true }
+}
+
+/** Per-zoom text flags (present / record): hide what would render below the target. */
+export function legibleFlags(ke, zoom, t = LEGIBLE) {
+  return {
+    hideDesc: LIKEC4_TITLE_PX * LIKEC4_DESC_RATIO * zoom < t.desc - 0.05,
+    hideEdgeLabels: LIKEC4_EDGE_PX * ke * zoom < t.edge - 0.05,
+  }
+}
+
+// ---------------------------------------------------------------- small-text visibility (present / record)
+// Decided from the camera's TARGET zoom for programmatic moves (transitions, fits, focus,
+// walkthrough steps) and frozen while they run — so nothing pops in and out mid-zoom; only a
+// settled USER zoom (wheel / pinch) is evaluated live, with hysteresis and a short fade.
+export const VIS_HYSTERESIS = 1.1
+const EPS = 0.05
+
+/** Which small text is hidden at `zoom` (`prev` → hysteresis: hidden text needs +10% to come back). */
+export function textVisFor(ke, zoom, prev, t = LEGIBLE) {
+  const desc = LIKEC4_TITLE_PX * LIKEC4_DESC_RATIO * zoom
+  const edge = LIKEC4_EDGE_PX * ke * zoom
+  const hidden = (size, thr, was) => (was ? size < thr * VIS_HYSTERESIS - EPS : size < thr - EPS)
+  return { hideDesc: hidden(desc, t.desc, prev?.hideDesc), hideEdgeLabels: hidden(edge, t.edge, prev?.hideEdgeLabels) }
+}
+
+/** The initial visibility state of a layer. */
+export const visInit = (ke, zoom) => ({ ...textVisFor(ke, zoom), frozenUntil: 0, fade: false })
+
+/**
+ * Visibility reducer. Events:
+ *  {type:'target', ke, zoom, until} — a programmatic move is starting toward `zoom`: decide from
+ *    the destination (no hysteresis, no fade) and freeze until `until` (ms timestamp; Infinity = until 'release').
+ *  {type:'freeze'} — keep the current state until 'release' (the parent layer of a zoom transition).
+ *  {type:'release', now} — the move ended.
+ *  {type:'live', ke, zoom, now, settled} — the observed zoom; ignored while frozen or mid-gesture.
+ */
+export function visReduce(s, e) {
+  switch (e.type) {
+    case 'target':
+      return { ...textVisFor(e.ke, e.zoom), frozenUntil: e.until ?? Infinity, fade: false }
+    case 'freeze':
+      return { ...s, frozenUntil: Infinity }
+    case 'release':
+      return s.frozenUntil ? { ...s, frozenUntil: Math.min(s.frozenUntil, e.now ?? 0) } : s
+    case 'live': {
+      if (!e.settled || (e.now ?? 0) < s.frozenUntil) return s
+      const next = textVisFor(e.ke, e.zoom, s)
+      if (next.hideDesc === s.hideDesc && next.hideEdgeLabels === s.hideEdgeLabels) return s
+      return { ...next, frozenUntil: 0, fade: true }
+    }
+  }
+  return s
+}
+
+// ---------------------------------------------------------------- keyboard ownership
+const CONTROL_TAGS = new Set(['BUTTON', 'A', 'SUMMARY', 'OPTION'])
+const EDIT_TAGS = new Set(['INPUT', 'TEXTAREA', 'SELECT'])
+const CONTROL_ROLES = new Set(['button', 'link', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'option', 'tab', 'switch', 'checkbox', 'radio', 'combobox', 'slider', 'spinbutton', 'menu', 'listbox', 'textbox', 'searchbox'])
+
+/**
+ * Who owns a keydown, from its composed path (innermost first; shadow DOM included) — entries
+ * `{tag, role, editable, chrome}`. 'editable' (a field: the presenter keeps out entirely),
+ * 'control' (a button / link / menu item… or anything in the presenter's chrome: native
+ * activation + Tab order win, only Escape is ours), else 'surface' (the diagram / page: ours).
+ */
+export function keyOwner(path) {
+  for (const n of path ?? []) {
+    if (!n) continue
+    if (n.editable || EDIT_TAGS.has(n.tag)) return 'editable'
+    if (CONTROL_TAGS.has(n.tag) || CONTROL_ROLES.has(n.role) || n.chrome) return 'control'
+  }
+  return 'surface'
+}
+
+/** Should the presenter act on this key, given who owns it? (Tab is never ours.) */
+export function presenterOwns(key, owner) {
+  if (key === 'Tab') return false
+  if (owner === 'editable') return false
+  if (owner === 'control') return key === 'Escape'
+  return true
 }

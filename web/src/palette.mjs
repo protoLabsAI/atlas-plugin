@@ -201,7 +201,8 @@ export function paletteCss(p) {
       out.push(`[data-likec4-color="${name}"][data-compound-depth="${d}"]{${decl({ '--likec4-palette-fill': hex(fillD), '--likec4-palette-stroke': hex(mix(c.elements.stroke, bg, k)), '--likec4-palette-hiContrast': hex(hiD), '--likec4-palette-loContrast': hex(ensureContrast(mix(hiD, seen, 0.2), seen)) })}}`)
     }
   }
-  // selection / focus rings follow the DS focus colour
-  out.push(`.react-flow__node.selected,.react-flow__node:focus-visible{--likec4-palette-outline:var(--pl-color-focus, var(--pl-color-accent)) !important}`)
+  // selection / focus rings: the foreground colour, NOT the accent — primary nodes are filled with
+  // the accent, so an accent ring would vanish against them; fg separates from fill and canvas
+  out.push(`.react-flow__node.selected,.react-flow__node:focus-visible{--likec4-palette-outline:var(--pl-color-fg) !important}`)
   return out.join('\n')
 }

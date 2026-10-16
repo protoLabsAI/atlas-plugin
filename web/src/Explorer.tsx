@@ -3,10 +3,21 @@
 // uses the same synced-camera zoom as the presenter. Commands (focus / walkthrough / fit)
 // run once the stage has settled on their view.
 import type { LikeC4Model } from '@likec4/core/model'
-import { memo, useEffect, useRef } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
+import { applyHighlight, clearHighlight, type Highlight } from './highlight'
+import { calloutPlacement, mdLight } from './logic.mjs'
+import { Button } from '@protolabsai/ui/primitives'
 import { Stage, type StageHandle } from './Stage'
 
-export type ExploreCmd = { seq: number; view: string; focus?: string; step?: number | 'start' | 'next' | 'prev' | 'stop'; fit?: boolean }
+export type ExploreCmd = {
+  seq: number
+  view: string
+  focus?: string
+  step?: number | 'start' | 'next' | 'prev' | 'stop'
+  fit?: boolean
+  highlight?: Highlight
+  clear?: boolean
+}
 
 type Props = {
   model: LikeC4Model<any>
@@ -20,6 +31,10 @@ type Props = {
   onWalk: (step: number | null) => void
   onSettled?: (view: string) => void
   onNodeMenu?: (fqn: string, node: any, e: MouseEvent) => void
+  /** the live callout (a highlight's note), anchored to its first focused node */
+  callout?: { view: string; node: string; note: string } | null
+  onDismissCallout?: () => void
+  onCodeRefClick?: (e: React.MouseEvent | React.KeyboardEvent) => void
 }
 
 const stepId = (n: number) => `step-${String(n).padStart(2, '0')}` as any
@@ -36,7 +51,7 @@ const LAYER_PROPS = {
   maxZoom: 3,
 }
 
-function ExplorerImpl({ model, data, viewId, scheme, themeCss, cmd, onNavigate, onSelect, onWalk, onSettled, onNodeMenu }: Props) {
+function ExplorerImpl({ model, data, viewId, scheme, themeCss, cmd, onNavigate, onSelect, onWalk, onSettled, onNodeMenu, callout, onDismissCallout, onCodeRefClick }: Props) {
   const stage = useRef<StageHandle>(null)
   const initial = useRef(viewId)
 
@@ -63,6 +78,27 @@ function ExplorerImpl({ model, data, viewId, scheme, themeCss, cmd, onNavigate, 
       if (!d) return
       const ctx = d.getContext() as any
       const st = cmd.step
+      if (cmd.clear) {
+        clearHighlight(d)
+        return
+      }
+      if (cmd.highlight && !st) {
+        clearHighlight(d)
+        applyHighlight(d, s.xyflow(), data?.views?.[cmd.view], cmd.highlight)
+        return
+      }
+      if (cmd.highlight && typeof st === 'number') {
+        // walk to the step first; light the highlight over it once the walkthrough camera settles
+        const id = stepId(st)
+        if (ctx.activeWalkthrough) d.walkthroughStep({ step: id })
+        else d.startWalkthrough(id)
+        setTimeout(() => {
+          if (!live) return
+          applyHighlight(d, s.xyflow(), data?.views?.[cmd.view], cmd.highlight!, { keepWalkthrough: true, fit: false })
+          onWalk(st)
+        }, 900)
+        return
+      }
       if (st === 'stop') {
         d.stopWalkthrough()
         d.fitDiagram(450)
@@ -88,13 +124,14 @@ function ExplorerImpl({ model, data, viewId, scheme, themeCss, cmd, onNavigate, 
     return () => {
       live = false
     }
-  }, [cmd, onWalk])
+  }, [cmd, onWalk, data])
 
   useEffect(() => {
     ;(window as any).__atlasStage = stage.current
   })
 
   return (
+    <>
     <Stage
       ref={stage}
       model={model}
@@ -110,6 +147,73 @@ function ExplorerImpl({ model, data, viewId, scheme, themeCss, cmd, onNavigate, 
       onNodeContextMenu={onNodeMenu ? (n, e) => onNodeMenu(n.modelRef ?? n.id, n, e) : undefined}
       onSettled={onSettled}
     />
+    {callout && callout.view === viewId && (
+      <Callout stage={stage} node={data?.views?.[viewId]?.nodes?.find((n: any) => n.id === callout.node)} note={callout.note} onDismiss={onDismissCallout} onCodeRefClick={onCodeRefClick} />
+    )}
+    </>
+  )
+}
+
+/** The on-canvas callout. Follows its node through pans / zooms / transitions: a cheap 8 Hz check
+ *  of the camera, and per-frame updates only while the camera is actually moving (no idle rAF).
+ *  Off-canvas anchor → hidden until it's back. Tall notes scroll inside a bounded box.
+ *  TODO(protoContent#602): move to the DS Popover once it takes virtual anchors + an arrow. */
+function Callout({ stage, node, note, onDismiss, onCodeRefClick }: { stage: React.RefObject<StageHandle | null>; node: any; note: string; onDismiss?: () => void; onCodeRefClick?: (e: any) => void }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState<any>(null)
+  useEffect(() => {
+    if (!node) return
+    let raf = 0
+    let last = ''
+    let still = 0
+    const measure = () => {
+      const s = stage.current
+      const el = ref.current
+      const host = el?.parentElement
+      if (!s || !el || !host || s.busy()) return true
+      const vp = s.xyflow()?.getViewport?.()
+      if (!vp) return true
+      const p = calloutPlacement(node, vp, { width: host.clientWidth, height: host.clientHeight }, { width: el.offsetWidth, height: el.scrollHeight }) as any
+      const key = JSON.stringify(p)
+      if (key === last) return false
+      last = key
+      setPos(p)
+      return true
+    }
+    const burst = () => {
+      // follow the camera frame by frame until it has been still for ~10 frames
+      cancelAnimationFrame(raf)
+      const step = () => {
+        still = measure() ? 0 : still + 1
+        if (still < 10) raf = requestAnimationFrame(step)
+      }
+      raf = requestAnimationFrame(step)
+    }
+    burst()
+    const id = window.setInterval(() => measure() && burst(), 125)
+    const ro = new ResizeObserver(() => burst())
+    if (ref.current?.parentElement) ro.observe(ref.current.parentElement)
+    return () => {
+      cancelAnimationFrame(raf)
+      window.clearInterval(id)
+      ro.disconnect()
+    }
+  }, [node, stage, note])
+  if (!node) return null
+  return (
+    <div
+      ref={ref}
+      className={`callout callout--${pos?.side ?? 'above'}`}
+      role="note"
+      data-testid="callout"
+      hidden={!!pos?.hidden}
+      style={{ left: pos?.left ?? -9999, top: pos?.top ?? -9999, maxHeight: pos?.maxHeight, ['--arrow-x' as any]: `${pos?.arrowX ?? 20}px` }}
+    >
+      <div className="callout__body" onClick={onCodeRefClick} onKeyDown={onCodeRefClick} dangerouslySetInnerHTML={{ __html: mdLight(note, { codeRefs: true }) }} />
+      <Button variant="ghost" size="xs" icon className="callout__close" aria-label="Dismiss" onClick={onDismiss}>
+        ×
+      </Button>
+    </div>
   )
 }
 

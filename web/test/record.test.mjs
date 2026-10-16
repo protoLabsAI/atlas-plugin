@@ -1,0 +1,58 @@
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { slideDwellMs, stepDwellMs, stepCaption, words, parseDeepLink, END_HOLD_MS, FINAL_CAPTION_MIN_MS, CAPTION_FADE_MS, BEAT_MS, outroMs, endHoldFor, endBeatFor, toursFor, cleanTitle } from '../src/logic.mjs'
+
+test('dwell model (pinned to record.py — see tests/test_record.py)', () => {
+  assert.equal(words('The **graph** owns `the` loop.'), 5)
+  assert.equal(slideDwellMs({ note: '' }), 2500, 'minimum')
+  assert.equal(slideDwellMs({ note: 'one two three four five six seven eight nine ten' }), 3800)
+  assert.equal(slideDwellMs({ note: 'x', hold_ms: 7000 }), 7000)
+  assert.equal(slideDwellMs({ note: 'w '.repeat(200) }), 15000, 'capped')
+  assert.equal(stepDwellMs('POST chat'), 2500) // a walked step reads like a slide: ≥ 2.5 s
+  assert.equal(stepDwellMs('one two three four five six'), 2760)
+  assert.deepEqual([END_HOLD_MS, FINAL_CAPTION_MIN_MS, CAPTION_FADE_MS, BEAT_MS, outroMs(), outroMs(0), outroMs(0, 0)], [1500, 5000, 400, 1000, 2900, 1400, 400])
+  // the default end hold tops the last caption up to 5 s on screen; an explicit one is taken as is
+  assert.equal(endHoldFor({}, 2500), 2500)
+  assert.equal(endHoldFor({}, 7900), 1500)
+  assert.equal(endHoldFor({ end_hold_ms: 0 }, 2500), 0)
+  assert.equal(endBeatFor({}), 1000)
+  assert.equal(endBeatFor({ end_beat_ms: 3000 }), 3000)
+})
+
+test('parseDeepLink', () => {
+  assert.deepEqual(parseDeepLink('#tour=overview&slide=2&present=1&autoplay=1&record=1'), { present: true, autoplay: true, record: true, tour: 'overview', slide: 2, focus: [] })
+  assert.deepEqual(parseDeepLink('#view=index&focus=a,b&step=3'), { present: false, autoplay: false, record: false, view: 'index', step: 3, focus: ['a', 'b'] })
+  assert.equal(parseDeepLink('#record=1'), null, 'needs a tour or a view')
+  assert.equal(parseDeepLink(''), null)
+  assert.equal(parseDeepLink('#section-2'), null, 'a plain anchor is not a deep link')
+  assert.equal(parseDeepLink('#tour=auto&record=1').autoplay, true, 'record implies autoplay + present')
+})
+
+test('hold_ms survives toursFor (validated 500–60000) — the viewer dwells what record.py plans', () => {
+  const data = { elements: {}, views: { index: { id: 'index', _type: 'element', nodes: [] } } }
+  const [t] = toursFor({ tours: [{ id: 't', slides: [{ view: 'index', hold_ms: 20000 }, { view: 'index', hold_ms: 5 }, { view: 'index', hold_ms: '9000' }] }] }, data)
+  assert.deepEqual(t.slides.map((s) => s.hold_ms), [20000, undefined, undefined])
+  assert.equal(slideDwellMs(t.slides[0]), 20000)
+})
+
+test('cleanTitle (menu names the recorder matches exactly)', () => {
+  assert.equal(cleanTitle('A\u2028walk\u0085 \n through'), 'A walk through')
+  assert.equal(cleanTitle(''), 'Tour')
+})
+
+test('end_hold_ms survives toursFor (0–30000)', () => {
+  const data = { elements: {}, views: { index: { id: 'index', _type: 'element', nodes: [] } } }
+  const [t] = toursFor({ tours: [{ id: 't', end_hold_ms: 6000, slides: [{ view: 'index' }] }] }, data)
+  assert.equal(t.end_hold_ms, 6000)
+  assert.equal(toursFor({ tours: [{ id: 't', end_hold_ms: 99999, slides: [{ view: 'index' }] }] }, data)[0].end_hold_ms, undefined)
+  assert.equal(toursFor({ tours: [{ id: 't', end_beat_ms: 3000, slides: [{ view: 'index' }] }] }, data)[0].end_beat_ms, 3000)
+  assert.equal(toursFor({ tours: [{ id: 't', end_beat_ms: 5001, slides: [{ view: 'index' }] }] }, data)[0].end_beat_ms, undefined)
+})
+
+test('a walked step is captioned from its notes, else From → To: label', () => {
+  const view = { nodes: [{ id: 'a', title: 'Console' }, { id: 'x.b', title: 'Server' }] }
+  assert.equal(stepCaption(view, { id: 'step-01', source: 'a', target: 'x.b', label: 'POST', notes: { txt: 'The console posts it.' } }), 'The console posts it.')
+  assert.equal(stepCaption(view, { id: 'step-02', source: 'a', target: 'x.b', label: 'POST', notes: 'Plain.' }), 'Plain.')
+  assert.equal(stepCaption(view, { id: 'step-03', source: 'x.b', target: 'a', label: 'SSE' }), 'Server → Console: SSE')
+  assert.equal(stepCaption(view, { id: 'step-04', source: 'a', target: 'zz.c' }), 'Console → c')
+})

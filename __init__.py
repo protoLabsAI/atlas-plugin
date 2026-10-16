@@ -2,8 +2,8 @@
 
 ``register()`` mounts two routers: the PUBLIC ``/plugins/atlas`` one (the viewer page + its built
 assets — an iframe load carries no bearer) and the GATED ``/api/plugins/atlas`` one (the exported
-model + status). It registers three agent tools (``atlas_validate`` / ``atlas_describe`` /
-``atlas_show``), the ``install-node`` setup step behind the "Install Node runtime" banner button,
+model + status). It registers four agent tools (``atlas_validate`` / ``atlas_describe`` /
+``atlas_show`` / ``atlas_clear``), the ``install-node`` setup step behind the "Install Node runtime" banner button,
 and the ``skills/atlas`` authoring skill; then probes for a usable Node so a missing one shows as
 a setup banner at load, not as a failed tool call.
 
@@ -57,10 +57,20 @@ def register(registry) -> None:
     except Exception:  # noqa: BLE001 — the routers are best-effort
         log.exception("[atlas] mounting the routers failed")
 
+    from .nav import ViewerState
+
+    viewer = ViewerState()  # what the operator sees — published by the viewer as atlas.viewing
+    on = getattr(registry, "on", None)
+    if callable(on):
+        try:
+            on("atlas.viewing", viewer.on_event)
+        except Exception:  # noqa: BLE001 — an older host without bus subscriptions
+            log.exception("[atlas] subscribing to atlas.viewing failed")
+
     try:
         from .tools import build_tools
 
-        registry.register_tools(build_tools(service, registry))
+        registry.register_tools(build_tools(service, registry, viewer))
     except Exception:  # noqa: BLE001
         log.exception("[atlas] registering the agent tools failed")
 

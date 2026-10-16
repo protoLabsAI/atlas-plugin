@@ -1,13 +1,16 @@
 id: atlas
 name: Atlas
-version: 0.1.0
+version: 0.2.0
 description: >-
   Drill-down architecture diagrams you can explore and present. Atlas renders a
   project's LikeC4 model (a directory of .c4 files, default <project>/architecture/)
   as a console view: click an element to drill into it, follow code links into the
-  console's code pane, and run guided tours in presenter mode. The agent gets three
-  tools (atlas_validate, atlas_describe, atlas_show) and a skill for authoring the
-  model. Layout runs in a vendored, offline engine that needs Node.js 20 or newer —
+  console's code pane, and run guided tours in presenter mode — or autoplay one as a
+  recordable walkthrough. The agent gets five tools (atlas_validate, atlas_describe,
+  atlas_show, atlas_clear, atlas_record_script) to check the model, narrate it live —
+  show an element, highlight nodes and relationship paths, pin a callout, step through
+  flows, see what the operator is looking at — and script a screen recording; plus a
+  skill for authoring the model. Layout runs in a vendored, offline engine that needs Node.js 20 or newer —
   the one on PATH, or protoAgent's managed Node runtime (one click from the setup
   banner).
 enabled: false
@@ -43,9 +46,15 @@ views:
 public_paths:
   - "/plugins/atlas/static/"
 
-# Bus topics (ADR 0039). The open viewer subscribes to atlas.# and navigates.
+# Bus topics (ADR 0039). The open viewer subscribes to atlas.# and navigates / highlights;
+# it publishes what the operator sees (atlas.viewing), which the backend keeps for
+# atlas_describe(current=true).
 emits:
-  - atlas.show   # {view?, step?, focus?, tour?, slide?, present} — the agent asked to show a view / tour
+  - atlas.show      # {view, step?, focus?: [fqn], edges?: [edgeId], note?, tour?, slide?, present} — the agent asked to show / highlight
+  - atlas.clear     # {} — remove highlights and callouts
+  - atlas.viewing   # {view, step, selected, focus, edges, note, mode, tour, slide} — published by the viewer (debounced)
+subscribes:
+  - atlas.viewing   # the backend's "what the operator is looking at"
 
 # Declarative transparency (surfaced in the console; not enforced).
 capabilities:

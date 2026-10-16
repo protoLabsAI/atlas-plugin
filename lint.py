@@ -8,7 +8,8 @@ Rules (each finding is ``{rule, message, view?, element?, tour?}``):
   ``code-link-outside`` — a file link that escapes the project root;
 * ``sequence-nesting`` — a ``variant sequence`` dynamic view using both an element and one of its
   descendants (LikeC4 silently drops those steps);
-* ``tour-*`` — tours naming an unknown view / element, a step out of range, or a malformed file;
+* ``tour-*`` — tours naming an unknown view / element, a step out of range, a ``hold_ms`` outside
+  500–60000, or a malformed file;
 * ``empty-view`` — a view with no nodes;
 * ``busy-view`` — a view with more than ``MAX_VIEW_NODES`` nodes (unreadable in the console panel —
   group the elements into sub-systems with their own scoped views).
@@ -23,6 +24,11 @@ from pathlib import Path
 TOURS_FILE = "atlas.tours.json"
 _STEP_ID = re.compile(r"^step-(\d+)")
 MAX_VIEW_NODES = 12
+HOLD_MIN_MS, HOLD_MAX_MS = 500, 60_000
+# a tour slide's optional `hold_ms` (autoplay / recording dwell) is HOLD_*; a tour's optional
+# `end_hold_ms` (record: extra time on the last caption) and `end_beat_ms` (the clean beat after it)
+END_HOLD_MIN_MS, END_HOLD_MAX_MS = 0, 30_000
+END_BEAT_MIN_MS, END_BEAT_MAX_MS = 0, 5_000
 
 
 # ── model helpers ───────────────────────────────────────────────────────────────────────────
@@ -109,16 +115,25 @@ def auto_tour(model: dict | None) -> dict:
     """The tour the viewer derives with no tours file: ``index``, then each scoped view in model
     tree order, then each dynamic view."""
     vs = views(model)
+
+    def note(vid: str) -> str:
+        # the viewer's autoTour note (`title — description`): the dwell is timed from it
+        v = vs[vid]
+        d = v.get("description")
+        if isinstance(d, dict):
+            d = d.get("md") or d.get("txt")
+        return " — ".join(x for x in (str(v.get("title") or vid), str(d or "").strip()) if x)
+
     slides = []
     if "index" in vs:
-        slides.append({"view": "index"})
+        slides.append({"view": "index", "note": note("index")})
     order = {f: i for i, f in enumerate(tree_order(model))}
     scoped = sorted(
         (vid for vid, v in vs.items() if view_kind(v) == "scoped"),
         key=lambda vid: order.get(vs[vid].get("viewOf"), len(order)),
     )
-    slides += [{"view": vid} for vid in scoped]
-    slides += [{"view": vid} for vid, v in vs.items() if view_kind(v) == "dynamic"]
+    slides += [{"view": vid, "note": note(vid)} for vid in scoped]
+    slides += [{"view": vid, "note": note(vid)} for vid, v in vs.items() if view_kind(v) == "dynamic"]
     return {"id": "auto", "title": "Overview", "slides": slides}
 
 
@@ -244,10 +259,17 @@ def check_slide(model: dict, slide: dict) -> list[str]:
     view = vs.get(vid)
     if view is None:
         return [f"unknown view {vid!r}"]
+    hold = slide.get("hold_ms")
+    if hold is not None and (
+        isinstance(hold, bool) or not isinstance(hold, int) or not HOLD_MIN_MS <= hold <= HOLD_MAX_MS
+    ):
+        problems.append(f"hold_ms {hold!r} must be an integer between {HOLD_MIN_MS} and {HOLD_MAX_MS} (milliseconds)")
     for key in ("focus", "via"):
-        fqn = slide.get(key)
-        if fqn is not None and fqn not in elements(model):
-            problems.append(f"{key} {fqn!r} is not an element")
+        val = slide.get(key)
+        # `focus` may name several elements (a list); `via` is one
+        for fqn in val if key == "focus" and isinstance(val, list) else [val]:
+            if fqn is not None and (not isinstance(fqn, str) or fqn not in elements(model)):
+                problems.append(f"{key} {fqn!r} is not an element")
     step = slide.get("step")
     if step is not None:
         if view_kind(view) != "dynamic":
@@ -267,6 +289,28 @@ def _lint_tours(model: dict, tours: dict | None) -> list[dict]:
         if tid in seen_ids:
             out.append({"rule": "tour-duplicate", "tour": tid, "message": f"tour id {tid!r} is used twice"})
         seen_ids.add(tid)
+        eh = tour.get("end_hold_ms")
+        if eh is not None and (
+            isinstance(eh, bool) or not isinstance(eh, int) or not END_HOLD_MIN_MS <= eh <= END_HOLD_MAX_MS
+        ):
+            out.append(
+                {
+                    "rule": "tour-end-hold",
+                    "tour": tid,
+                    "message": f"tour {tid} end_hold_ms {eh!r} must be an integer between {END_HOLD_MIN_MS} and {END_HOLD_MAX_MS}",
+                }
+            )
+        eb = tour.get("end_beat_ms")
+        if eb is not None and (
+            isinstance(eb, bool) or not isinstance(eb, int) or not END_BEAT_MIN_MS <= eb <= END_BEAT_MAX_MS
+        ):
+            out.append(
+                {
+                    "rule": "tour-end-beat",
+                    "tour": tid,
+                    "message": f"tour {tid} end_beat_ms {eb!r} must be an integer between {END_BEAT_MIN_MS} and {END_BEAT_MAX_MS}",
+                }
+            )
         slides = tour.get("slides")
         if not isinstance(slides, list) or not slides:
             out.append({"rule": "tour-empty", "tour": tid, "message": f"tour {tid} has no slides"})
@@ -277,6 +321,28 @@ def _lint_tours(model: dict, tours: dict | None) -> list[dict]:
                 continue
             for problem in check_slide(model, slide):
                 out.append({"rule": "tour-slide", "tour": tid, "message": f"tour {tid} slide {n}: {problem}"})
+        # hand-picked steps of one dynamic view that skip steps read as "skipping half the flow":
+        # a slide on the view with no `step` walks every step, captioned from the steps' notes
+        prev = None
+        for n, slide in enumerate(slides, 1):
+            cur = (slide.get("view"), slide.get("step")) if isinstance(slide, dict) else (None, None)
+            if (
+                prev
+                and cur[0] == prev[0]
+                and isinstance(cur[1], int)
+                and isinstance(prev[1], int)
+                and cur[1] - prev[1] > 1
+            ):
+                out.append(
+                    {
+                        "rule": "tour-step-skip",
+                        "tour": tid,
+                        "message": f"tour {tid} slide {n}: step {prev[1]} → {cur[1]} on {cur[0]} skips "
+                        f"{cur[1] - prev[1] - 1} step(s) — one slide with no `step` walks them all "
+                        "(each captioned from its step `notes`)",
+                    }
+                )
+            prev = cur
     return out
 
 

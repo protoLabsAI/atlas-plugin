@@ -5,10 +5,15 @@ import { Details } from './Details'
 import { Explorer, type ExploreCmd } from './Explorer'
 import { Presenter, type PresenterCmd, type Tour } from './Presenter'
 import { BASE, currentScheme, embedded, fromParent, post, subscribeBus, type Kit } from './host'
+import type { Highlight } from './highlight'
+import { Button, Empty } from '@protolabsai/ui/primitives'
+import { Input, Select } from '@protolabsai/ui/forms'
+import { Menu, MenuItem, MenuLabel, MenuSeparator } from '@protolabsai/ui/menu'
+import { useToast } from '@protolabsai/ui/overlays'
 import { setSpeed } from './motion'
 import { themeFor } from './theme'
 import {
-  codeOpenMessage, codeRoute, displayFile, dynamicSteps, errorFileRel, keepView, keyCombo, nodeMenuItems, normaliseLinks,
+  askPrompt, keyOwner, CLEAR_TOPIC, codeOpenMessage, exploreShowPlan, parseDeepLink, SHOW_TOPIC, codeRoute, hostSupportsCompose, viewingPayload, displayFile, dynamicSteps, errorFileRel, keepView, keyCombo, nodeMenuItems, normaliseLinks,
   parseShow, resolveProject, scopedViewOf, searchModel, shouldForwardKey, slideForView, toursFor, viewChain, viewForElement, viewOptions,
 } from './logic.mjs'
 
@@ -147,7 +152,7 @@ function useAtlasData(kit: Kit) {
 }
 
 // ---------------------------------------------------------------- app
-type Mode = { kind: 'explore' } | { kind: 'present'; tour: string; start: number; nonce: number }
+type Mode = { kind: 'explore' } | { kind: 'present'; tour: string; start: number; nonce: number; autoplay?: boolean; record?: boolean; done?: boolean }
 
 export function App({ kit }: { kit: Kit }) {
   const { scheme, css: themeCss } = useScheme(kit)
@@ -161,9 +166,10 @@ export function App({ kit }: { kit: Kit }) {
   const [ecmd, setEcmd] = useState<ExploreCmd | null>(null)
   const [pcmd, setPcmd] = useState<PresenterCmd | null>(null)
   const [walk, setWalk] = useState<number | null>(null)
+  const [highlight, setHighlight] = useState<Highlight | null>(null)
+  const [presenting, setPresenting] = useState<{ view: string; slide: number; step: number | null } | null>(null)
   const [query, setQuery] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
-  const [toast, setToast] = useState<string | null>(null)
   const [errorsOpen, setErrorsOpen] = useState(false)
   const seq = useRef(0)
   const searchRef = useRef<HTMLInputElement>(null)
@@ -190,23 +196,25 @@ export function App({ kit }: { kit: Kit }) {
     [setViewId, command],
   )
 
-  const showToast = useCallback((t: string) => {
-    setToast(t)
-    window.setTimeout(() => setToast((x) => (x === t ? null : x)), 3500)
-  }, [])
+  const toast = useToast()
+  const showToast = useCallback((t: string) => void toast({ message: t, tone: 'info', duration: 3500 }), [toast])
 
   // ---- code links → core's code pane (click) or the operator's editor (⌘/Ctrl-click)
   // Pane availability: GET /api/runtime/status → code_pane.enabled (null = unknown/older host).
   const [paneOn, setPaneOn] = useState<boolean | null>(null)
+  // "Ask about this" → protoagent:chat:compose (core ≥ 0.206.0; unknown version → shown)
+  const [canCompose, setCanCompose] = useState(false) // hidden until /status proves the host can
   useEffect(() => {
     const check = async () => {
       try {
         const r = await kit.apiFetch('/api/runtime/status', { cache: 'no-store' })
-        if (!r.ok) return
-        const v = (await r.json())?.code_pane?.enabled
+        if (!r.ok) return setCanCompose(false)
+        const st = await r.json()
+        const v = st?.code_pane?.enabled
         setPaneOn(typeof v === 'boolean' ? v : null)
+        setCanCompose(embedded && hostSupportsCompose(st?.version))
       } catch {
-        /* older host: keep unknown */
+        setCanCompose(false) // older host / no status: keep the pane unknown, compose hidden
       }
     }
     void check()
@@ -263,12 +271,12 @@ export function App({ kit }: { kit: Kit }) {
 
   // ---- presenter
   const present = useCallback(
-    (tourId?: string, start?: number) => {
+    (tourId?: string, start?: number, opts: { autoplay?: boolean; record?: boolean } = {}) => {
       if (!tours.length) return
       const t = tours.find((x) => x.id === tourId) ?? tours[0]
-      const s = typeof start === 'number' ? start : slideForView(t.slides, viewId ?? 'index')
+      const s = typeof start === 'number' ? start : opts.autoplay ? 0 : slideForView(t.slides, viewId ?? 'index')
       setSelected(null)
-      setMode({ kind: 'present', tour: t.id, start: s, nonce: ++seq.current })
+      setMode({ kind: 'present', tour: t.id, start: s, nonce: ++seq.current, autoplay: !!opts.autoplay, record: !!opts.record })
     },
     [tours, viewId],
   )
@@ -297,8 +305,9 @@ export function App({ kit }: { kit: Kit }) {
     }
     if (req.present) {
       const t = mode.kind === 'present' ? tours.find((x) => x.id === mode.tour) ?? tours[0] : tours[0]
-      const exact = t.slides.findIndex((s) => s.view === req.view && (s.step ?? 0) === (req.step ?? 0) && (s.focus ?? '') === (req.focus ?? ''))
-      const adhoc = { view: req.view, step: req.step, focus: req.focus, note: data.views[req.view]?.title }
+      const live = req.focus.length > 1 || req.edges.length > 0 || !!req.note
+      const exact = live ? -1 : t.slides.findIndex((s) => s.view === req.view && (s.step ?? 0) === (req.step ?? 0) && (s.focus ?? '') === (req.focus[0] ?? ''))
+      const adhoc = { view: req.view, step: req.step, focus: req.focus.length > 1 ? req.focus : req.focus[0], edges: req.edges, note: req.note ?? data.views[req.view]?.title }
       if (mode.kind === 'present') setPcmd({ seq: ++seq.current, slide: exact >= 0 ? exact : undefined, adhoc: exact >= 0 ? undefined : adhoc })
       else if (exact >= 0) present(t.id, exact)
       else {
@@ -309,12 +318,18 @@ export function App({ kit }: { kit: Kit }) {
     }
     if (mode.kind === 'present') setMode({ kind: 'explore' })
     setViewId(req.view)
-    if (req.step) command({ view: req.view, step: req.step })
-    else if (req.focus) {
-      command({ view: req.view, focus: req.focus })
-      setSelected(req.focus)
-    } else command({ view: req.view, fit: true })
+    setSelected(null)
+    const plan = exploreShowPlan(req) as any
+    setHighlight(plan.highlight)
+    // a step AND a highlight: walk to the step, then light the highlight + callout over it
+    command({ view: req.view, step: plan.step, highlight: plan.highlight ?? undefined, fit: plan.fit })
   }
+  const clearLive = useCallback(() => {
+    setHighlight((h) => {
+      if (h) command({ view: h.view, clear: true })
+      return null
+    })
+  }, [command])
   useEffect(() => {
     if (data && pendingShow.current) {
       const d = pendingShow.current
@@ -333,7 +348,8 @@ export function App({ kit }: { kit: Kit }) {
         if (m.seq <= lastSeq) return
         lastSeq = m.seq
       }
-      if (m.topic === 'atlas.show' || String(m.topic).endsWith('.atlas.show')) showRef.current(m.data ?? {})
+      if (m.topic === SHOW_TOPIC) showRef.current(m.data ?? {})
+      else if (m.topic === CLEAR_TOPIC) clearRef.current()
     }
     window.addEventListener('message', onMsg)
     subscribeBus()
@@ -358,6 +374,7 @@ export function App({ kit }: { kit: Kit }) {
       if (to) setViewId(to)
     } else if (id === 'present') present(undefined, slideForView(tours[0]?.slides ?? [], viewId ?? 'index'))
     else if (id === 'copy') void copyText(fqn).then((ok) => showToast(ok ? `Copied ${fqn}` : fqn))
+    else if (id === 'ask') ask(fqn)
   }
   const onNodeMenu = useCallback(
     (fqn: string, node: any, e: MouseEvent) => {
@@ -371,10 +388,11 @@ export function App({ kit }: { kit: Kit }) {
         paneOn,
         canDrill: !!(node?.navigateTo ?? scopedViewOf(data, fqn)),
         canPresent: tours.length > 0,
+        canAsk: canCompose,
       })
       post({ type: 'protoagent:contextmenu:open', x: e.clientX, y: e.clientY, items })
     },
-    [data, paneOn, tours.length],
+    [data, paneOn, tours.length, canCompose],
   )
 
   // ---- host chords: forward ⌘/Ctrl/Alt keys Atlas didn't handle (⌘⇧K palette etc. keep working)
@@ -389,12 +407,71 @@ export function App({ kit }: { kit: Kit }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  // ---- atlas.clear from the bus
+  const clearRef = useRef<() => void>(() => {})
+  clearRef.current = clearLive
+
+  // ---- "Ask about this" → the console's chat draft (protoagent:chat:compose; never sends)
+  const lastAsk = useRef(0)
+  const ask = useCallback(
+    (fqn?: string | null) => {
+      if (!data || !canCompose) return
+      const now = Date.now()
+      if (now - lastAsk.current < 1000) return // the host allows 1/s per view
+      lastAsk.current = now
+      const v = mode.kind === 'present' ? presenting?.view : viewId
+      const text = askPrompt(data, { view: v, fqn: fqn ?? undefined, step: (mode.kind === 'present' ? presenting?.step : walk) ?? undefined })
+      if (post({ type: 'protoagent:chat:compose', text })) showToast('Added to the chat box — edit and send')
+    },
+    [data, canCompose, mode.kind, presenting, viewId, walk, showToast],
+  )
+
+  // ---- what the operator sees → atlas.viewing (debounced) for atlas_describe(current=true)
+  const viewing = useMemo(
+    () =>
+      data
+        ? viewingPayload(
+            mode.kind === 'present'
+              ? { mode: 'present', view: presenting?.view ?? null, step: presenting?.step ?? null, tour: mode.tour, slide: presenting?.slide ?? mode.start }
+              : { mode: 'explore', view: viewId, step: walk, selected, highlight },
+          )
+        : null,
+    [data, mode, presenting, viewId, walk, selected, highlight],
+  )
+  const viewingKey = JSON.stringify(viewing)
+  const instance = useMemo(() => Math.random().toString(36).slice(2, 10), [])
+  const sendViewing = useCallback(
+    (extra: Record<string, unknown> = {}) => viewing && post({ type: 'protoagent:publish', topic: 'atlas.viewing', data: { ...viewing, instance, ...extra } }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [viewingKey, instance],
+  )
+  useEffect(() => {
+    if (!viewing) return
+    const t = window.setTimeout(() => sendViewing(), 400)
+    return () => window.clearTimeout(t)
+  }, [sendViewing, viewing])
+  // heartbeat while visible (the backend marks a view stale after ~90 s of silence) + hidden / closed
+  useEffect(() => {
+    const beat = window.setInterval(() => document.visibilityState === 'visible' && sendViewing(), 30_000)
+    const onVis = () => sendViewing(document.visibilityState === 'visible' ? {} : { hidden: true })
+    const onHide = () => sendViewing({ closed: true })
+    document.addEventListener('visibilitychange', onVis)
+    window.addEventListener('pagehide', onHide)
+    return () => {
+      window.clearInterval(beat)
+      document.removeEventListener('visibilitychange', onVis)
+      window.removeEventListener('pagehide', onHide)
+    }
+  }, [sendViewing])
+
   // ---- keyboard (explore): "/" search, "p" present
   useEffect(() => {
     if (mode.kind !== 'explore') return
     const onKey = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement | null
-      if (e.metaKey || e.ctrlKey || e.altKey || (t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      // only on the page / diagram — never while a button, link, menu or field has focus
+      const owner = keyOwner(e.composedPath().map((n: any) => (n instanceof Element ? { tag: n.tagName, role: n.getAttribute('role'), editable: (n as HTMLElement).isContentEditable } : null)))
+      if (owner !== 'surface') return
       if (e.key === '/') {
         e.preventDefault()
         searchRef.current?.focus()
@@ -407,9 +484,38 @@ export function App({ kit }: { kit: Kit }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [mode.kind, present])
 
+  // ---- stable hooks for recorders / tests: data-atlas-state | -slide | -view on <html>
+  const atlasState = !data ? 'loading' : mode.kind === 'present' ? (mode.done ? 'tour-done' : 'presenting') : 'ready'
+  useEffect(() => {
+    const r = document.documentElement
+    r.dataset.atlasState = atlasState
+    const v = mode.kind === 'present' ? presenting?.view : viewId
+    if (v) r.dataset.atlasView = v
+    if (mode.kind === 'present' && presenting) r.dataset.atlasSlide = String(presenting.slide + 1)
+    else delete r.dataset.atlasSlide
+    r.classList.toggle('atlas-record', mode.kind === 'present' && !!mode.record)
+  }, [atlasState, mode, presenting, viewId])
+
+  // ---- deep link: #tour=<id>&slide=<n>&present=1&autoplay=1&record=1  |  #view=<id>&focus=<fqn>&step=<n>
+  const linked = useRef(false)
+  useEffect(() => {
+    if (linked.current || !data || !tours.length) return
+    const link = parseDeepLink(location.hash) as any
+    if (!link) return
+    linked.current = true
+    if (link.tour) {
+      const t = tours.find((x) => x.id === link.tour)
+      if (!t) return showToast(`Unknown tour ${link.tour}`)
+      const start = Math.min(Math.max((link.slide ?? 1) - 1, 0), t.slides.length - 1)
+      if (link.present) present(t.id, start, { autoplay: link.autoplay, record: link.record })
+      return
+    }
+    showRef.current({ view: link.view, focus: link.focus, step: link.step, present: link.present })
+  }, [data, tours, present, showToast])
+
   // ---- test hook
   useEffect(() => {
-    ;(window as any).__atlas = { view: viewId, mode: mode.kind, selected, walk, paneOn, hash: resp?.hash, ok: resp?.ok, stale: resp?.stale, tours: tours.map((t) => [t.id, t.slides.length]), scheme, base: BASE, embedded }
+    ;(window as any).__atlas = { view: viewId, mode: mode.kind, selected, walk, paneOn, highlight, viewing, canCompose, hash: resp?.hash, ok: resp?.ok, stale: resp?.stale, tours: tours.map((t) => [t.id, t.slides.length]), scheme, base: BASE, embedded }
   })
 
   // ---------------------------------------------------------------- render
@@ -420,11 +526,11 @@ export function App({ kit }: { kit: Kit }) {
 
   if (!data) {
     let body: JSX.Element
-    if (!resp && !net) body = <div className="pl-empty" data-testid="loading">Loading the architecture model…</div>
+    if (!resp && !net) body = <Empty data-testid="loading" description="Loading the architecture model…" />
     else if (nodeBad || !enginePresent) body = <EngineMissing status={status!} />
     else if (exists === false) body = <EmptyState resp={resp} status={status} />
     else if (resp && errors.length) body = <BrokenState errors={errors} info={resp} onOpen={openErrorFile} />
-    else body = <div className="pl-empty">{net ?? modelError ?? 'No model yet.'}</div>
+    else body = <Empty description={net ?? modelError ?? 'No model yet.'} />
     return (
       <div className="app">
         {net && <div className="pl-banner pl-banner--error banner">{net}</div>}
@@ -460,6 +566,10 @@ export function App({ kit }: { kit: Kit }) {
           onTour={(id) => setMode({ kind: 'present', tour: id, start: 0, nonce: ++seq.current })}
           onExit={exitPresent}
           onNoteClick={onCodeRefClick}
+          onState={setPresenting}
+          autoplay={mode.autoplay}
+          record={mode.record}
+          onDone={() => setMode((m) => (m.kind === 'present' ? { ...m, done: true } : m))}
         />
       </div>
     )
@@ -479,7 +589,8 @@ export function App({ kit }: { kit: Kit }) {
           ))}
         </nav>
         <span className="sp" />
-        <select className="pl-input pl-select viewpick" aria-label="View" value={viewId ?? ''} onChange={(e) => setViewId(e.target.value)}>
+        <span className="viewpick">
+        <Select aria-label="View" value={viewId ?? ''} onChange={(e) => setViewId(e.target.value)}>
           {viewOptions(data).map((o: any) => (
             <option key={o.id} value={o.id}>
               {' '.repeat(o.depth * 2)}
@@ -487,11 +598,11 @@ export function App({ kit }: { kit: Kit }) {
               {o.title}
             </option>
           ))}
-        </select>
+        </Select>
+        </span>
         <div className="search">
-          <input
+          <Input
             ref={searchRef}
-            className="pl-input"
             type="search"
             placeholder="Search  /"
             aria-label="Search elements and views"
@@ -522,60 +633,83 @@ export function App({ kit }: { kit: Kit }) {
             </ul>
           )}
         </div>
-        <button className="pl-btn pl-btn--sm pl-btn--primary present-btn" onClick={() => present()} title="Present (P)">
-          ▶ Present
-        </button>
+        <div className="present-group">
+          <Button size="sm" variant="primary" className="present-btn" onClick={() => present()} title="Present (P)">
+            ▶ Present
+          </Button>
+          <Menu
+            align="end"
+            trigger={
+              <Button size="sm" icon aria-label="Tour options">
+                ▾
+              </Button>
+            }
+          >
+            {tours.map((t, i) => (
+              <div key={t.id} role="group" aria-label={t.title}>
+                {i > 0 && <MenuSeparator />}
+                <MenuLabel>
+                  {t.title} · {t.slides.length} slides
+                </MenuLabel>
+                <MenuItem onSelect={() => present(t.id, 0)}>{`Present — ${t.title}`}</MenuItem>
+                <MenuItem onSelect={() => present(t.id, 0, { autoplay: true })}>{`Autoplay — ${t.title}`}</MenuItem>
+                <MenuItem onSelect={() => present(t.id, 0, { autoplay: true, record: true })}>{`Record — ${t.title}`}</MenuItem>
+              </div>
+            ))}
+          </Menu>
+        </div>
       </header>
       {errors.length > 0 && <ErrorBanner errors={errors} info={resp} stale={!!resp?.stale} open={errorsOpen} setOpen={setErrorsOpen} onOpen={openErrorFile} />}
       {net && <div className="pl-banner pl-banner--warning banner">{net}</div>}
       <main className="main">
         <div className="canvas">
           {viewId && v ? (
-            <Explorer model={model!.m} data={data} viewId={viewId} scheme={scheme} themeCss={themeCss} cmd={ecmd} onNavigate={(to) => (setViewId(to), setSelected(null))} onSelect={setSelected} onWalk={setWalk} onNodeMenu={onNodeMenu} />
+            <Explorer model={model!.m} data={data} viewId={viewId} scheme={scheme} themeCss={themeCss} cmd={ecmd} onNavigate={(to) => (setViewId(to), setSelected(null), setHighlight(null))}
+              onSelect={(f) => {
+                setSelected(f)
+                if (highlight) clearLive() // the operator took over — the agent's highlight yields
+              }}
+              onWalk={setWalk}
+              onNodeMenu={onNodeMenu}
+              callout={highlight?.note ? { view: highlight.view, node: highlight.focus[0] ?? '', note: highlight.note } : null}
+              onDismissCallout={() => setHighlight((h) => (h ? { ...h, note: undefined } : h))}
+              onCodeRefClick={onCodeRefClick}
+            />
           ) : (
-            <div className="pl-empty">This model has no views yet.</div>
+            <Empty title="This model has no views yet." />
           )}
           <div className="canvas-tools">
             {steps > 0 &&
               (walk == null ? (
-                <button className="pl-btn pl-btn--sm" onClick={() => command({ view: viewId!, step: 'start' })}>
+                <Button size="sm" onClick={() => command({ view: viewId!, step: 'start' })}>
                   ▶ Walk through {steps} steps
-                </button>
+                </Button>
               ) : (
                 <>
-                  <button className="pl-btn pl-btn--sm pl-btn--icon" aria-label="Previous step" onClick={() => command({ view: viewId!, step: 'prev' })}>
+                  <Button size="sm" icon aria-label="Previous step" onClick={() => command({ view: viewId!, step: 'prev' })}>
                     ‹
-                  </button>
+                  </Button>
                   <span className="walkpos">
                     step {walk} / {steps}
                   </span>
-                  <button className="pl-btn pl-btn--sm pl-btn--icon" aria-label="Next step" onClick={() => command({ view: viewId!, step: 'next' })}>
+                  <Button size="sm" icon aria-label="Next step" onClick={() => command({ view: viewId!, step: 'next' })}>
                     ›
-                  </button>
-                  <button className="pl-btn pl-btn--sm" onClick={() => command({ view: viewId!, step: 'stop' })}>
+                  </Button>
+                  <Button size="sm" onClick={() => command({ view: viewId!, step: 'stop' })}>
                     Stop
-                  </button>
+                  </Button>
                 </>
               ))}
-            <button className="pl-btn pl-btn--sm pl-btn--icon" title="Fit view" aria-label="Fit view" onClick={() => command({ view: viewId!, fit: true })}>
+            <Button size="sm" icon title="Fit view" aria-label="Fit view" onClick={() => command({ view: viewId!, fit: true })}>
               ⤢
-            </button>
+            </Button>
           </div>
           {v?.description && !selected && <div className="view-desc">{v.description.txt ?? v.description.md}</div>}
         </div>
         {selected && data.elements?.[selected] && (
-          <Details data={data} fqn={selected} paneOn={paneOn} onClose={() => setSelected(null)} onOpenView={(vv, f) => openView(vv, f)} onCode={(l, note, how) => void openCode(l, note, how)} onCodeRefClick={onCodeRefClick} />
+          <Details data={data} fqn={selected} paneOn={paneOn} onClose={() => setSelected(null)} onOpenView={(vv, f) => openView(vv, f)} onCode={(l, note, how) => void openCode(l, note, how)} onCodeRefClick={onCodeRefClick} onAsk={canCompose ? () => ask(selected) : undefined} />
         )}
       </main>
-      {toast && (
-        <div className="pl-toast-stack atlas-toasts">
-          <div className="pl-toast pl-toast--info" role="status">
-            <div className="pl-toast__body">
-              <div className="pl-toast__msg">{toast}</div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 
@@ -597,6 +731,8 @@ type OpenErr = (e: any, mods?: { metaKey?: boolean; ctrlKey?: boolean }) => void
 function ErrorBanner({ errors, info, stale, open, setOpen, onOpen, compact }: { errors: any[]; info: any; stale: boolean; open: boolean; setOpen: (b: boolean) => void; onOpen: OpenErr; compact?: boolean }) {
   const first = errors[0]
   return (
+    // TODO(protoContent#601): adopt the DS <Banner> once it takes a role override — it hardcodes
+    // role="status", and model errors must keep their role="alert" announcement.
     <div className={`pl-banner pl-banner--error banner${compact ? ' compact' : ''}`} role="alert" data-testid="error-banner">
       <div className="b-row">
         <strong>
@@ -605,7 +741,7 @@ function ErrorBanner({ errors, info, stale, open, setOpen, onOpen, compact }: { 
         <span className="b-sub">{stale ? 'showing the last good version' : ''}</span>
         <ErrorLine e={first} info={info} onOpen={onOpen} />
         {errors.length > 1 && (
-          <button className="linkish" onClick={() => setOpen(!open)}>
+          <button type="button" className="linkish" onClick={() => setOpen(!open)}>
             {open ? 'less' : `+${errors.length - 1} more`}
           </button>
         )}
@@ -631,7 +767,7 @@ function ErrorLine({ e, info, onOpen }: { e: any; info: any; onOpen: OpenErr }) 
     <span className="b-err">
       {loc &&
         (can ? (
-          <button className="b-loc linkish" onClick={(ev) => onOpen(e, ev)} title="View in the code pane (⌘/Ctrl-click: open in editor)">
+          <button type="button" className="b-loc linkish" onClick={(ev) => onOpen(e, ev)} title="View in the code pane (⌘/Ctrl-click: open in editor)">
             {loc}
           </button>
         ) : (
@@ -645,54 +781,58 @@ function ErrorLine({ e, info, onOpen }: { e: any; info: any; onOpen: OpenErr }) 
 function EmptyState({ resp, status }: { resp: Resp | null; status: Status | null }) {
   const dir = resp?.model_dir ?? status?.model_dir
   return (
-    <div className="pl-empty state-card" data-testid="empty-state">
-      <div className="pl-empty__icon state-icon" aria-hidden>
-        ◇
-      </div>
-      <h1 className="pl-empty__title">No architecture map yet</h1>
-      <p className="pl-empty__desc">
-        Ask the agent to <strong>“map this project’s architecture”</strong> — the Atlas skill writes a LikeC4 model of the
-        system, with drill-down views and code links, and this page picks it up live.
-      </p>
+    <Empty
+      className="state-card"
+      data-testid="empty-state"
+      icon="◇"
+      title="No architecture map yet"
+      description={
+        <>
+          Ask the agent to <strong>“map this project’s architecture”</strong> — the Atlas skill writes a LikeC4 model of the
+          system, with drill-down views and code links, and this page picks it up live.
+        </>
+      }
+    >
       {dir && (
         <p className="muted small">
           Looking for the model in <code>{dir}</code>
         </p>
       )}
-    </div>
+    </Empty>
   )
 }
 
 function EngineMissing({ status }: { status: Status }) {
   const n = status?.node ?? {}
   return (
-    <div className="pl-empty state-card" data-testid="engine-state">
-      <div className="pl-empty__icon state-icon" aria-hidden>
-        ⚙
-      </div>
-      <h1 className="pl-empty__title">Atlas needs Node.js 20+</h1>
-      {status?.engine_present === false ? (
-        <p className="pl-empty__desc">The layout engine (vendor/atlas-engine.mjs) is missing from the plugin install — reinstall or update Atlas.</p>
-      ) : (
-        <p className="pl-empty__desc">
-          Atlas lays diagrams out with a small Node.js engine and couldn’t find a usable <code>node</code>. Install the
-          managed Node runtime from the setup banner, or set <strong>Node.js path</strong> in Atlas’s settings.
-        </p>
-      )}
+    <Empty
+      className="state-card"
+      data-testid="engine-state"
+      icon="⚙"
+      title="Atlas needs Node.js 20+"
+      description={
+        status?.engine_present === false ? (
+          'The layout engine (vendor/atlas-engine.mjs) is missing from the plugin install — reinstall or update Atlas.'
+        ) : (
+          <>
+            Atlas lays diagrams out with a small Node.js engine and couldn’t find a usable <code>node</code>. Install the
+            managed Node runtime from the setup banner, or set <strong>Node.js path</strong> in Atlas’s settings.
+          </>
+        )
+      }
+    >
       {(n.error || n.version || n.path) && (
         <p className="muted small">
           {n.path ? <code>{n.path}</code> : null} {n.version ? `(${n.version})` : null} {n.error}
         </p>
       )}
-    </div>
+    </Empty>
   )
 }
 
 function BrokenState({ errors, info, onOpen }: { errors: any[]; info: any; onOpen: OpenErr }) {
   return (
-    <div className="pl-empty state-card wide" data-testid="broken-state">
-      <h1 className="pl-empty__title">The architecture model doesn’t compile yet</h1>
-      <p className="muted">Fix these and the diagram appears here automatically.</p>
+    <Empty className="state-card wide" data-testid="broken-state" title="The architecture model doesn’t compile yet" description="Fix these and the diagram appears here automatically.">
       <ul className="b-list">
         {errors.slice(0, 40).map((e, i) => (
           <li key={i}>
@@ -700,7 +840,7 @@ function BrokenState({ errors, info, onOpen }: { errors: any[]; info: any; onOpe
           </li>
         ))}
       </ul>
-    </div>
+    </Empty>
   )
 }
 

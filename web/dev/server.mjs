@@ -28,12 +28,30 @@ const PROJECT = arg('--project', '')  // '' → omit `project` so the viewer res
 const STATIC = resolve(here, '../../static')
 const ENGINE = resolve(here, '../../vendor/atlas-engine.mjs')
 const REAL_KIT = process.env.PROTOAGENT_DIR ? join(process.env.PROTOAGENT_DIR, 'apps/web/dist/_ds') : ''
-const KIT = process.argv.includes('--real-kit') && REAL_KIT && existsSync(REAL_KIT) ? REAL_KIT : join(here, 'kit')
+// the pinned @protolabsai/ui kit from node_modules (what a host serves at /_ds); --real-kit uses a
+// protoAgent checkout's build; dev/kit stubs only when neither exists
+const NPM_KIT = resolve(here, '../node_modules/@protolabsai/ui')
+const KIT = process.argv.includes('--real-kit') && REAL_KIT && existsSync(REAL_KIT) ? REAL_KIT : existsSync(join(NPM_KIT, 'dist/plugin-kit.css')) ? NPM_KIT : join(here, 'kit')
+const kitFile = (name) => (KIT === NPM_KIT ? join(KIT, name === 'plugin-kit.css' ? 'dist/plugin-kit.css' : 'src/plugin-kit.js') : join(KIT, name))
 const state = { scenario: 'normal', token: '', tours: true, pane: true }
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml' }
 
 // Fallback tours for a model without its own atlas.tours.json: the bundled example's.
-const SAMPLE_TOURS = JSON.parse(readFileSync(resolve(here, '../../examples/protoagent/atlas.tours.json'), 'utf8'))
+// the example's tours when serving the example model; else a sample for the atlas-spike skill-2 model
+const EXAMPLE_DIR = resolve(here, '../../examples/protoagent')
+const SAMPLE_TOURS = MODEL_DIR === EXAMPLE_DIR ? JSON.parse(readFileSync(join(EXAMPLE_DIR, 'atlas.tours.json'), 'utf8')) : { tours: [
+  { id: 'overview', title: 'protoAgent in 5 minutes', slides: [
+    { view: 'index', note: 'The landscape: an **operator**, the protoAgent runtime, and the systems it talks to.' },
+    { view: 'index', focus: 'proto_agent', note: 'protoAgent is the system we own. Press *Enter* to open it.' },
+    { view: 'proto_agent_detail', note: 'Inside: console, API server, agent graph, tools, knowledge.' },
+    { view: 'proto_agent_detail', focus: 'proto_agent.graph', note: 'The agent graph owns the tool loop — `graph/agent.py`.' },
+    { view: 'proto_agent_graph_detail', note: 'The graph: core loop, LLM client, middleware, subagents.' },
+    { view: 'chat_turn_flow', step: 1, note: 'One chat turn: the operator sends a message.' },
+    { view: 'chat_turn_flow', step: 3, note: 'The server hands the turn to the graph — it never calls the model directly.' },
+    { view: 'chat_turn_flow', step: 5, note: 'The LLM client asks the gateway for a completion.' },
+    { view: 'index', note: 'Back out to the landscape.' },
+  ] },
+] }
 
 async function dirHash(dir) {
   const h = createHash('sha256')
@@ -147,7 +165,7 @@ createServer(async (req, res) => {
       if (!f.startsWith(STATIC + '/') || !existsSync(f)) return send(res, 404, 'not found')
       return send(res, 200, await readFile(f), { 'Content-Type': TYPES[extname(f)] || 'application/octet-stream' })
     }
-    if (path === '/_ds/plugin-kit.css' || path === '/_ds/plugin-kit.js') return send(res, 200, await readFile(join(KIT, path.slice(5))), { 'Content-Type': TYPES[extname(path)] })
+    if (path === '/_ds/plugin-kit.css' || path === '/_ds/plugin-kit.js') return send(res, 200, await readFile(kitFile(path.slice(5))), { 'Content-Type': TYPES[extname(path)] })
     if (path.startsWith('/api/')) {
       if (state.token && req.headers.authorization !== `Bearer ${state.token}`) return json(res, 401, { detail: 'unauthorized' })
       if (path === '/api/runtime/status') return json(res, 200, { code_pane: { enabled: state.pane } })

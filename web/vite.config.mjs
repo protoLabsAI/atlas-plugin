@@ -21,7 +21,12 @@ function atlasIndex() {
         .replace(/\/\*[^]*?\*\//g, '')
         .replace(/\s*\n\s*/g, '\n')
         .trim()
+      // a GENERATED snapshot of the DS token defaults (the :root block of the pinned
+      // @protolabsai/ui plugin-kit.css) — only used when the host serves no /_ds kit
+      const kit = readFileSync(here('./node_modules/@protolabsai/ui/dist/plugin-kit.css'), 'utf8')
+      const tokens = (kit.match(/:root\s*\{[^}]*\}/) ?? [''])[0].replace(/\s*\n\s*/g, '')
       const html = readFileSync(here('./src/index.template.html'), 'utf8')
+        .replace('/*__ATLAS_TOKENS__*/', () => tokens)
         .replace('/*__ATLAS_CSS__*/', () => css)
         .replace('__ATLAS_ENTRY__', entry.fileName)
       this.emitFile({ type: 'asset', fileName: 'index.html', source: html })

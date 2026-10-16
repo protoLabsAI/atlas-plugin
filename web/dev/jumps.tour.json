@@ -1,0 +1,14 @@
+{
+  "id": "jumps",
+  "title": "Framing test: cousin jumps",
+  "slides": [
+    {"view": "proto_agent_interfaces_server_detail", "note": "Start three levels down: the server."},
+    {"view": "proto_agent_core_graph_detail", "note": "Cousin, two levels each way: server to the agent graph."},
+    {"view": "proto_agent_interfaces_detail", "note": "Up two, down one: the interfaces."},
+    {"view": "proto_agent_core_graph_detail", "note": "Up one, down two: back to the agent graph."},
+    {"view": "index", "note": "Straight up three levels to the system context."},
+    {"view": "proto_agent_interfaces_server_detail", "note": "Straight down three levels to the server."},
+    {"view": "proto_agent_platform_detail", "note": "Up two, down one: the platform services."},
+    {"view": "proto_agent_core_detail", "note": "Siblings: platform to the agent core."}
+  ]
+}

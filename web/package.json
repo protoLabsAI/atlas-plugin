@@ -15,6 +15,7 @@
     "@likec4/language-services": "1.60.0",
     "@likec4/layouts": "1.60.0",
     "@likec4/styles": "1.60.0",
+    "@protolabsai/ui": "0.68.0",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },
