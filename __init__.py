@@ -2,10 +2,11 @@
 
 ``register()`` mounts two routers: the PUBLIC ``/plugins/atlas`` one (the viewer page + its built
 assets — an iframe load carries no bearer) and the GATED ``/api/plugins/atlas`` one (the exported
-model + status). It registers four agent tools (``atlas_validate`` / ``atlas_describe`` /
-``atlas_show`` / ``atlas_clear``), the ``install-node`` setup step behind the "Install Node runtime" banner button,
-and the ``skills/atlas`` authoring skill; then probes for a usable Node so a missing one shows as
-a setup banner at load, not as a failed tool call.
+model + status). It registers five agent tools (``atlas_validate`` / ``atlas_describe`` /
+``atlas_show`` / ``atlas_clear`` / ``atlas_record_script``), the ``atlas.viewing`` bus handler
+(what the operator sees), the ``install-node`` setup step behind the "Install Node runtime" banner
+button, and the ``skills/atlas`` authoring skill; then probes for a usable Node so a missing one
+shows as a setup banner at load, not as a failed tool call.
 
 Host-only imports stay lazy (inside the modules' functions, guarded) so the test suite runs with
 no protoAgent host.

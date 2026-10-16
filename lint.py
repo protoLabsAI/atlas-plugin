@@ -8,8 +8,12 @@ Rules (each finding is ``{rule, message, view?, element?, tour?}``):
   ``code-link-outside`` — a file link that escapes the project root;
 * ``sequence-nesting`` — a ``variant sequence`` dynamic view using both an element and one of its
   descendants (LikeC4 silently drops those steps);
-* ``tour-*`` — tours naming an unknown view / element, a step out of range, a ``hold_ms`` outside
-  500–60000, or a malformed file;
+* ``tour-slide`` — a slide that isn't an object, has no / an unknown ``view``, a ``focus`` / ``via``
+  that isn't an element, a ``step`` off a dynamic view or out of range, or ``hold_ms`` outside
+  500–60000; ``tour-duplicate`` / ``tour-empty`` — a reused id, a tour with no slides;
+  ``tour-end-hold`` / ``tour-end-beat`` — ``end_hold_ms`` outside 0–30000, ``end_beat_ms`` outside
+  0–5000; ``tour-step-skip`` — consecutive slides on one flow that skip steps (a malformed
+  ``atlas.tours.json`` is reported as an engine error by ``read_tours``);
 * ``empty-view`` — a view with no nodes;
 * ``busy-view`` — a view with more than ``MAX_VIEW_NODES`` nodes (unreadable in the console panel —
   group the elements into sub-systems with their own scoped views).
