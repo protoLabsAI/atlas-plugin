@@ -2,6 +2,18 @@
 
 All notable changes to Atlas. Versions follow `version` in `protoagent.plugin.yaml`.
 
+## [0.2.4]
+
+### Fixed
+
+- **`atlas_show` from the console's own chat turn now moves the view** ([#11](https://github.com/protoLabsAI/atlas-plugin/issues/11)).
+  The tool emits `atlas.show` and then asks the console to open Atlas. In the console that owns the
+  turn, that navigate remounts an already-open view
+  ([protoAgent#4283](https://github.com/protoLabsAI/protoAgent/issues/4283)), and the fresh page
+  missed the show, so the diagram stayed on System context. The backend now keeps the latest show or
+  clear, gated at `GET /api/plugins/atlas/last-show`. A view that mounts applies it while it is under
+  15 s old, and bus events carry a `show_seq`, so a request delivered both ways applies once.
+
 ## [0.2.3]
 
 ### Changed

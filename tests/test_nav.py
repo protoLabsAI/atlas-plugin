@@ -265,10 +265,10 @@ async def test_tools_current_next_and_clear(stub, registry):
     assert "Selected element: app.api (API Server)" in cur
     out = await tools["atlas_show"].ainvoke({"step": "next"})
     assert out.startswith("Showing view turn (Chat turn), step 2 of 3 — API Server → Agent graph: run")
-    assert registry.emitted[-1] == ("atlas.show", {"present": False, "view": "turn", "step": 2})
+    assert registry.emitted[-1] == ("atlas.show", {"present": False, "view": "turn", "step": 2, "show_seq": 1})
     out = await tools["atlas_show"].ainvoke({"element": ["app.api", "app.store"], "note": "Where a turn lands."})
     assert "highlighting API Server, State store" in out and "with a callout" in out
     assert await tools["atlas_clear"].ainvoke({}) == "Cleared the Atlas highlights."
-    assert registry.emitted[-1] == ("atlas.clear", {})
+    assert registry.emitted[-1][0] == "atlas.clear" and isinstance(registry.emitted[-1][1]["show_seq"], int)
     bad = await tools["atlas_show"].ainvoke({"element": "nope"})
     assert bad.startswith("Can't show that: unknown element 'nope'")

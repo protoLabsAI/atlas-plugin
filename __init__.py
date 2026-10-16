@@ -50,11 +50,14 @@ def register(registry) -> None:
     gap = NodeGap(registry)
     service = AtlasService(live, store_dir=_store_dir(registry), gap=gap)
 
+    from .nav import LastShow
+
+    last_show = LastShow()  # the latest show / clear, replayed to a view that mounts just after (#11)
     try:
         from .api import build_data_router, build_view_router
 
         registry.register_router(build_view_router(), prefix="/plugins/atlas")
-        registry.register_router(build_data_router(service), prefix="/api/plugins/atlas")
+        registry.register_router(build_data_router(service, last_show), prefix="/api/plugins/atlas")
     except Exception:  # noqa: BLE001 — the routers are best-effort
         log.exception("[atlas] mounting the routers failed")
 
@@ -71,7 +74,7 @@ def register(registry) -> None:
     try:
         from .tools import build_tools
 
-        registry.register_tools(build_tools(service, registry, viewer))
+        registry.register_tools(build_tools(service, registry, viewer, last_show))
     except Exception:  # noqa: BLE001
         log.exception("[atlas] registering the agent tools failed")
 

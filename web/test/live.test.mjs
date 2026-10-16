@@ -172,3 +172,19 @@ test('calloutPlacement keeps the other lit nodes clear: below the anchor, else a
   // nothing to avoid: unchanged
   assert.equal(calloutPlacement(anchor, vp, canvas, size).side, 'above')
 })
+
+test('show replay on mount (#11): fresh + newer only; the bus dedupes by show_seq', async () => {
+  const { replayAction, alreadyApplied, SHOW_REPLAY_MS } = await import('../src/logic.mjs')
+  const show = { seq: 3, kind: 'show', data: { view: 'index', show_seq: 3 }, age_ms: 900, fresh_ms: 15000 }
+  assert.equal(replayAction(show, 0), 'show') // a show published just before this view mounted
+  assert.equal(replayAction({ ...show, kind: 'clear' }, 0), 'clear')
+  assert.equal(replayAction(show, 3), null) // already applied (it came on the bus first)
+  assert.equal(replayAction({ ...show, age_ms: 15001 }, 0), null) // stale: never resurrect an old show
+  assert.equal(replayAction({ ...show, fresh_ms: undefined, age_ms: SHOW_REPLAY_MS + 1 }, 0), null)
+  assert.equal(replayAction(null, 0), null)
+  assert.equal(replayAction({ ...show, kind: 'nope' }, 0), null)
+  // the bus: a frame whose show_seq the replay already applied is dropped; older backends (no seq) pass
+  assert.equal(alreadyApplied({ show_seq: 3 }, 3), true)
+  assert.equal(alreadyApplied({ show_seq: 4 }, 3), false)
+  assert.equal(alreadyApplied({ view: 'index' }, 3), false)
+})

@@ -480,3 +480,43 @@ def plan_view_show(
             return None, "a note needs something to anchor to — give element/focus/relations"
         event["note"] = note
     return event, ""
+
+
+# ── the latest show / clear (replayed to a view that mounts just after it, #11) ─────────────────
+
+SHOW_REPLAY_S = 15  # a viewer applies a replayed request only while it's this fresh
+
+
+class LastShow:
+    """The latest ``atlas.show`` / ``atlas.clear`` request, in memory, with a monotonic ``seq``.
+
+    ``atlas_show`` emits the show and then asks the console to navigate to Atlas; in the console that
+    owns the turn the navigate REMOUNTS an already-open view (protoAgent#4283), and the fresh page
+    subscribes after the show went by. The view therefore asks for the last request when it mounts
+    (``GET /api/plugins/atlas/last-show``) and applies it while it's fresh; the ``show_seq`` it carries
+    (also on the bus event) lets a request that arrives both ways apply once."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._seq = 0
+        self._last: tuple[int, str, dict, float] | None = None
+
+    def record(self, kind: str, data: dict | None = None) -> int:
+        with self._lock:
+            self._seq += 1
+            self._last = (self._seq, kind, dict(data or {}), time.monotonic())
+            return self._seq
+
+    def get(self) -> dict | None:
+        with self._lock:
+            last = self._last
+        if not last:
+            return None
+        seq, kind, data, at = last
+        return {
+            "seq": seq,
+            "kind": kind,
+            "data": data,
+            "age_ms": int((time.monotonic() - at) * 1000),
+            "fresh_ms": SHOW_REPLAY_S * 1000,
+        }

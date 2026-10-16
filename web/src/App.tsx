@@ -13,7 +13,7 @@ import { useToast } from '@protolabsai/ui/overlays'
 import { setSpeed } from './motion'
 import { themeFor } from './theme'
 import {
-  askPrompt, keyOwner, CLEAR_TOPIC, codeOpenMessage, exploreShowPlan, parseDeepLink, SHOW_TOPIC, codeRoute, hostSupportsCompose, viewingPayload, displayFile, dynamicSteps, errorFileRel, keepView, keyCombo, nodeMenuItems, normaliseLinks,
+  askPrompt, alreadyApplied, replayAction, keyOwner, CLEAR_TOPIC, codeOpenMessage, exploreShowPlan, parseDeepLink, SHOW_TOPIC, codeRoute, hostSupportsCompose, viewingPayload, displayFile, dynamicSteps, errorFileRel, keepView, keyCombo, nodeMenuItems, normaliseLinks,
   parseShow, resolveProject, scopedViewOf, searchModel, shouldForwardKey, slideForView, toursFor, viewChain, viewForElement, viewOptions,
 } from './logic.mjs'
 
@@ -337,6 +337,29 @@ export function App({ kit }: { kit: Kit }) {
       showRef.current(d)
     }
   }, [data])
+  // the latest show / clear, once the model is up: a request published just before this view
+  // mounted (the console remounts an open view on navigate, protoAgent#4283) is replayed while
+  // fresh; `show_seq` makes one that ALSO arrives on the bus apply once (#11)
+  const appliedSeq = useRef(0)
+  const replayed = useRef(false)
+  useEffect(() => {
+    if (!data || replayed.current) return
+    replayed.current = true
+    void (async () => {
+      try {
+        const r = await kit.apiFetch('/api/plugins/atlas/last-show', { cache: 'no-store' })
+        if (!r.ok) return
+        const last = (await r.json())?.last
+        const act = replayAction(last, appliedSeq.current)
+        if (!act) return
+        appliedSeq.current = last.seq
+        if (act === 'show') showRef.current(last.data ?? {})
+        else clearRef.current()
+      } catch {
+        /* an older backend: no replay */
+      }
+    })()
+  }, [data, kit])
   useEffect(() => {
     let lastSeq = 0
     const onMsg = (e: MessageEvent) => {
@@ -347,6 +370,10 @@ export function App({ kit }: { kit: Kit }) {
       if (typeof m.seq === 'number') {
         if (m.seq <= lastSeq) return
         lastSeq = m.seq
+      }
+      if (m.topic === SHOW_TOPIC || m.topic === CLEAR_TOPIC) {
+        if (alreadyApplied(m.data, appliedSeq.current)) return // the replay (or a duplicate) had it
+        if (typeof m.data?.show_seq === 'number') appliedSeq.current = m.data.show_seq
       }
       if (m.topic === SHOW_TOPIC) showRef.current(m.data ?? {})
       else if (m.topic === CLEAR_TOPIC) clearRef.current()

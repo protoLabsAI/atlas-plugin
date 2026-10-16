@@ -245,9 +245,10 @@ def describe_show(event: dict, model: dict) -> str:
     return "Showing " + ", ".join(parts) + " in Atlas" + (" (presenter mode)." if event.get("present") else ".")
 
 
-def build_tools(service, registry, state: N.ViewerState | None = None):
+def build_tools(service, registry, state: N.ViewerState | None = None, last: N.LastShow | None = None):
     """The agent tools, bound to the service, the registry (bus + navigation) and the viewer state."""
     state = state or N.ViewerState()
+    last = last or N.LastShow()
 
     @tool
     async def atlas_validate() -> str:
@@ -312,6 +313,9 @@ def build_tools(service, registry, state: N.ViewerState | None = None):
         )
         if event is None:
             return why
+        # kept for a view that mounts right after (the navigate below can remount an open one,
+        # protoAgent#4283); `show_seq` lets one that gets it on the bus too apply it once (#11)
+        event = {**event, "show_seq": last.record("show", event)}
         registry.emit("atlas.show", event)
         nav = getattr(registry, "navigate", None)
         if callable(nav):
@@ -376,7 +380,7 @@ def build_tools(service, registry, state: N.ViewerState | None = None):
     @tool
     async def atlas_clear() -> str:
         """Remove Atlas highlights and callouts (the view itself stays where it is)."""
-        registry.emit("atlas.clear", {})
+        registry.emit("atlas.clear", {"show_seq": last.record("clear")})
         return "Cleared the Atlas highlights."
 
     return [atlas_validate, atlas_describe, atlas_show, atlas_clear, atlas_record_script]

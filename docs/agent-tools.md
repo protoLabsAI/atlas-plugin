@@ -288,6 +288,7 @@ Emitted by `atlas_show`, already resolved and validated:
 | `edges` | string[] | Edge ids in `view` to highlight. |
 | `note` | string | The callout, ≤ 280 characters. |
 | `tour`, `slide` | string, int | A tour and its 1-based slide. |
+| `show_seq` | int | Sequence number of this show / clear (see below). |
 
 The view checks every field again against the model (unknown ids dropped; a note without
 anything highlighted ignored). With `present`, a request that matches a tour slide jumps to it;
@@ -295,7 +296,17 @@ anything else is shown as an ad-hoc slide in the presenter.
 
 ### `atlas.clear`
 
-`{}` — drop highlights and callouts.
+`{"show_seq": n}` — drop highlights and callouts.
+
+### Replay to a view that mounts late
+
+The backend keeps the latest show or clear in memory and serves it at
+`GET /api/plugins/atlas/last-show` (gated): `{"last": {"seq", "kind": "show" | "clear", "data",
+"age_ms", "fresh_ms"}}`. A view applies it when it mounts if it is under 15 s old and newer than
+anything it already applied. Bus events carry the same `show_seq`, so a request that arrives both ways
+is applied once. This covers a view that the console remounts on `atlas_show`'s navigate
+([#11](https://github.com/protoLabsAI/atlas-plugin/issues/11),
+[protoAgent#4283](https://github.com/protoLabsAI/protoAgent/issues/4283)).
 
 ### `atlas.viewing` and its trust model
 
