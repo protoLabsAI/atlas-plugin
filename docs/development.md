@@ -66,12 +66,9 @@ npm run build          # build:engine + build:view + notices
 The build is reproducible: rebuilding an unchanged tree leaves `static/` and `vendor/`
 byte-identical, so a diff in them always means a real change.
 
-> [!WARNING]
-> **Known issue:** `npm run notices` (and so `npm run build`) currently exits 1 with
-> *@protolabsai/ui 0.68.0 ships no license file*. The package declares MIT but ships no LICENSE,
-> and its repository is private, so `web/licenses/protolabsai__ui-LICENSE.txt` must be added by a
-> maintainer. `build:engine` and `build:view` still complete. Until then `THIRD_PARTY_NOTICES.md`
-> doesn't list `@protolabsai/ui`.
+`@protolabsai/ui` and `@protolabsai/design` declare MIT but ship no LICENSE file, so their text is
+vendored in `web/licenses/protolabsai__{ui,design}-LICENSE.txt` (the upstream fix is tracked in
+protoLabsAI/protoContent — drop the vendored copies once the packages ship their own).
 
 When a dependency adds a package without a license file, `notices` names it; add its license to
 `web/licenses/<scope__name>-LICENSE.txt`. A Graphviz version bump needs its `COPYING` text the
