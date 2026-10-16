@@ -50,7 +50,67 @@ MAX_WAIT_MS = 180_000  # Campaign's per-step ceiling
 TAIL_MARGIN_MS = 20_000  # slack on each wait for camera drift / a slow machine
 CHUNK_MS = MAX_WAIT_MS - TAIL_MARGIN_MS
 FRAME = "/plugins/atlas/view"
-DEFAULT_BASE_URL = "http://localhost:7870"  # protoAgent's default console
+# No default console URL: a guess (e.g. :7870, protoAgent's default port) can record ANOTHER agent's
+# live console (#7). The URL is this server's own (``own_console_url``) or the caller's.
+BASE_URL_REQUIRED = "base_url is required: pass the URL this agent's console is served on"
+
+
+def own_console_url() -> str:
+    """The URL THIS agent's console is served on, or ``""`` when it can't be known for sure.
+
+    Prefers a core seam — ``graph.sdk.public_base_url()`` (protoAgent#4256 asks for it; the
+    agent-card rule of protoAgent#4255) — else applies the same rule as the A2A agent card
+    (``server/a2a.py::_a2a_card_url`` on core main): ``A2A_PUBLIC_URL`` if set, else the port
+    the running server actually bound (``STATE.active_port`` — trusted only once the server's
+    event loop is up, since its class default is 7870). Never a guessed port. Lazy + guarded:
+    outside a running core (tests, scripts) it's ``""``."""
+    import os
+
+    env = (os.environ.get("A2A_PUBLIC_URL") or "").strip().rstrip("/")
+    running = False
+    port = None
+    try:
+        from runtime.state import STATE
+
+        running = getattr(STATE, "main_loop", None) is not None
+        port = getattr(STATE, "active_port", None)
+    except Exception:  # noqa: BLE001 — no core here
+        pass
+    if not env and not running:
+        return ""
+    try:
+        from graph import sdk
+
+        seam = getattr(sdk, "public_base_url", None)
+        if callable(seam):
+            url = str(seam() or "").strip().rstrip("/")
+            if url:
+                return url
+    except Exception:  # noqa: BLE001 — an older core: the card's own rule below
+        pass
+    if env:
+        return env
+    if isinstance(port, int) and not isinstance(port, bool) and port > 0:
+        return f"http://127.0.0.1:{port}"
+    return ""
+
+
+def same_console(a: str, b: str) -> bool:
+    """Whether two console URLs point at the same server (loopback names are one host)."""
+    from urllib.parse import urlsplit
+
+    def key(u: str):
+        p = urlsplit(u.strip().rstrip("/"))
+        host = (p.hostname or "").lower()
+        if host in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
+            host = "loopback"
+        port = p.port or (443 if p.scheme == "https" else 80)
+        return (p.scheme, host, port, p.path.rstrip("/"))
+
+    try:
+        return key(a) == key(b)
+    except ValueError:
+        return False
 
 
 def words(text: str | None) -> int:
@@ -264,8 +324,10 @@ def shot_script(
     w, h = int(m.group(1)), int(m.group(2))
     if color_scheme not in ("dark", "light"):
         return None, 0, "color_scheme must be dark or light"
-    if base_url and not re.fullmatch(r"https?://[^\s/?#]+(/[^\s?#]*)?", base_url.strip()):
-        return None, 0, f"base_url {base_url!r} must be an http(s) URL like http://localhost:7870"
+    if not (base_url or "").strip():
+        return None, 0, BASE_URL_REQUIRED
+    if not re.fullmatch(r"https?://[^\s/?#]+(/[^\s?#]*)?", base_url.strip()):
+        return None, 0, f"base_url {base_url!r} must be an http(s) URL — the URL this agent's console is served on"
     if bearer_env and not re.fullmatch(r"[A-Z_][A-Z0-9_]*", bearer_env):
         return None, 0, "bearer_env must be an environment variable NAME like CAMPAIGN_APP_TOKEN"
     explicit = _tour_int(tours, tour, "end_hold_ms", L.END_HOLD_MIN_MS, L.END_HOLD_MAX_MS)
@@ -277,7 +339,7 @@ def shot_script(
         f"name: {_yaml_str('atlas-' + re.sub(r'[^A-Za-z0-9_.-]+', '-', tour)[:56])}",
         f"description: {_yaml_str(f'Atlas walkthrough — {title} ({len(slides)} slides, ~{round(duration / 1000)} s), recorded continuously in record mode.')}",
     ]
-    lines.append(f"base_url: {_yaml_str((base_url or DEFAULT_BASE_URL).rstrip('/'))}")
+    lines.append(f"base_url: {_yaml_str(base_url.strip().rstrip('/'))}")
     lines += [
         f"viewport: {{width: {w}, height: {h}}}",
         f"color_scheme: {color_scheme}",

@@ -32,6 +32,9 @@ TOURS = {
 }
 
 
+URL = "http://127.0.0.1:7953"  # never a default port (#7)
+
+
 def test_dwell_numbers_match_the_viewer():
     # the same cases as web/test/record.test.mjs — change both or neither
     assert R.words("The **graph** owns `the` loop.") == 5
@@ -64,11 +67,11 @@ def test_end_hold(tmp_path):
     assert R.end_hold_ms(tours, "walk") == 6000 and R.end_hold_ms(TOURS, "walk") == 1500
     assert R.end_hold_ms(TOURS, "walk", last_dwell=2500) == 2500  # topped up to a 5 s last caption
     assert R.end_hold_ms({"tours": [{"id": "walk", "end_hold_ms": 99999}]}, "walk") == 1500
-    _, ms, _ = R.shot_script(MODEL, tours, "walk")
+    _, ms, _ = R.shot_script(MODEL, tours, "walk", base_url=URL)
     assert ms == 27700 + 3500
     beat = {"tours": [{**TOURS["tours"][0], "end_beat_ms": 3000}]}
     assert R.end_beat_ms(beat, "walk") == 3000 and R.end_beat_ms(TOURS, "walk") == 1000
-    assert R.shot_script(MODEL, beat, "walk")[1] == 27700 + 2000
+    assert R.shot_script(MODEL, beat, "walk", base_url=URL)[1] == 27700 + 2000
     bad = [
         f
         for f in L.lint(MODEL, {"tours": [{"id": "t", "end_hold_ms": -1, "slides": [{"view": "index"}]}]}, tmp_path)
@@ -91,7 +94,7 @@ def test_hold_ms_lint():
 
 GOLDEN = """name: "atlas-walk"
 description: "Atlas walkthrough \\u2014 A walk (3 slides, ~28 s), recorded continuously in record mode."
-base_url: "http://localhost:7870"
+base_url: "http://127.0.0.1:7953"
 viewport: {width: 1280, height: 800}
 color_scheme: dark
 cursor: false
@@ -119,14 +122,14 @@ steps:
 
 
 def test_shot_script_golden():
-    text, ms, why = R.shot_script(MODEL, TOURS, "walk", base_url="http://localhost:7870/")
+    text, ms, why = R.shot_script(MODEL, TOURS, "walk", base_url="http://127.0.0.1:7953/")
     assert why == "" and ms == 27700
     assert text == GOLDEN
 
 
 def test_shot_script_long_tours_split_waits():
     slides = [{"view": "index", "hold_ms": 60000}] * 8  # ~8 min
-    text, ms, why = R.shot_script(MODEL, {"tours": [{"id": "long", "slides": slides}]}, "long")
+    text, ms, why = R.shot_script(MODEL, {"tours": [{"id": "long", "slides": slides}]}, "long", base_url=URL)
     assert why == "" and ms > 400_000
     starts = [0, *R.timeline(MODEL, slides)[:-1]]
     waits = [ln for ln in text.splitlines() if "[data-atlas-slide=" in ln]
@@ -148,7 +151,7 @@ def test_a_slide_longer_than_one_wait_is_refused():
         **MODEL,
         "views": {**MODEL["views"], "huge": {"_type": "dynamic", "id": "huge", "nodes": [], "edges": steps}},
     }
-    text, _, why = R.shot_script(model, {"tours": [{"id": "t", "slides": [{"view": "huge"}]}]}, "t")
+    text, _, why = R.shot_script(model, {"tours": [{"id": "t", "slides": [{"view": "huge"}]}]}, "t", base_url=URL)
     assert text is None and "longer than one recorder wait" in why
 
 
@@ -171,14 +174,17 @@ def test_titles_and_base_url():
 )
 def test_shot_script_rejects(kw, why):
     tour = kw.pop("tour")
-    text, _, msg = R.shot_script(MODEL, TOURS, tour, **kw)
+    text, _, msg = R.shot_script(MODEL, TOURS, tour, **{"base_url": URL, **kw})
     assert text is None and why in msg
 
 
 async def test_record_tool(tmp_path, registry):
     tools = {t.name: t for t in build_tools(_StubService(MODEL, TOURS, tmp_path), registry)}
     out = await tools["atlas_record_script"].ainvoke({"tour": "auto", "base_url": "http://h:1"})
-    assert out.startswith("Shot script for tour auto — about ") and '```yaml\nname: "atlas-auto"' in out
+    assert (
+        out.startswith("Shot script for tour auto (console http://h:1) — about ")
+        and '```yaml\nname: "atlas-auto"' in out
+    )
     assert "Record \\u2014 Overview" in out
 
 
@@ -199,18 +205,18 @@ def test_valid_against_campaigns_own_validator():
     for kw in (
         {},
         {
-            "base_url": "http://localhost:7870",
+            "base_url": "http://127.0.0.1:7953",
             "bearer_env": "CAMPAIGN_APP_TOKEN",
             "color_scheme": "light",
             "viewport": "1440x900",
         },
     ):
-        text, _, _ = R.shot_script(MODEL, TOURS, "walk", **kw)
+        text, _, _ = R.shot_script(MODEL, TOURS, "walk", **{"base_url": URL, **kw})
         script = mod.validate(text)
         marks = [st.get("name") for st in script["steps"] if st.get("op") == "mark"]
         assert marks == ["start", "end"], marks
     long = [{"view": "index", "hold_ms": 60000}] * 8
-    text, _, _ = R.shot_script(MODEL, {"tours": [{"id": "long", "slides": long}]}, "long")
+    text, _, _ = R.shot_script(MODEL, {"tours": [{"id": "long", "slides": long}]}, "long", base_url=URL)
     mod.validate(text)
 
 
@@ -260,3 +266,58 @@ def test_auto_tour_notes_match_the_viewer_so_the_timing_does():
         d = (d.get("md") or d.get("txt")) if isinstance(d, dict) else d
         assert s["note"] == " — ".join(x for x in (v.get("title") or s["view"], (d or "").strip()) if x)
     assert R.timeline(MODEL, auto["slides"])[0] == R.VIEW_CHANGE_MS + R.slide_dwell_ms(auto["slides"][0])
+
+
+# ── #7: the console URL is never guessed ──────────────────────────────────────────────────
+
+
+def test_a_blank_base_url_is_refused_never_defaulted():
+    text, _, why = R.shot_script(MODEL, TOURS, "walk")
+    assert text is None and why == R.BASE_URL_REQUIRED
+    assert not hasattr(R, "DEFAULT_BASE_URL")
+    src = Path(R.__file__).read_text()
+    assert "localhost:7870" not in src and "127.0.0.1:7870" not in src
+
+
+def test_own_console_url(monkeypatch):
+    import types
+
+    monkeypatch.delenv("A2A_PUBLIC_URL", raising=False)
+    # no core, or a core whose server isn't running: unknown (never the class-default 7870)
+    state = types.SimpleNamespace(active_port=7870, main_loop=None)
+    monkeypatch.setitem(sys.modules, "runtime", types.ModuleType("runtime"))
+    monkeypatch.setitem(sys.modules, "runtime.state", types.SimpleNamespace(STATE=state))
+    monkeypatch.setitem(sys.modules, "graph", types.ModuleType("graph"))
+    monkeypatch.setitem(sys.modules, "graph.sdk", types.ModuleType("graph.sdk"))
+    assert R.own_console_url() == ""
+    # the running server's bound port (the agent card's rule)
+    state.main_loop, state.active_port = object(), 7953
+    assert R.own_console_url() == "http://127.0.0.1:7953"
+    # A2A_PUBLIC_URL wins (a deployed agent / a fleet member behind the hub)
+    monkeypatch.setenv("A2A_PUBLIC_URL", "https://hub.example/agents/w1/")
+    assert R.own_console_url() == "https://hub.example/agents/w1"
+    # a core seam wins over both
+    sys.modules["graph.sdk"].public_base_url = lambda: "https://seam.example"
+    sys.modules["graph"].sdk = sys.modules["graph.sdk"]
+    assert R.own_console_url() == "https://seam.example"
+
+
+def test_same_console():
+    assert R.same_console("http://localhost:7953", "http://127.0.0.1:7953/")
+    assert not R.same_console("http://localhost:7870", "http://127.0.0.1:7953")
+    assert not R.same_console("https://a.example/x", "https://a.example/y")
+
+
+async def test_record_tool_uses_its_own_console_and_warns_on_another(tmp_path, registry, monkeypatch):
+    tools = {t.name: t for t in build_tools(_StubService(MODEL, TOURS, tmp_path), registry)}
+    monkeypatch.setattr(R, "own_console_url", lambda: "")
+    out = await tools["atlas_record_script"].ainvoke({"tour": "walk"})
+    assert out.startswith("Can't write the script: base_url is required") and "7870" not in out
+    monkeypatch.setattr(R, "own_console_url", lambda: "http://127.0.0.1:7953")
+    out = await tools["atlas_record_script"].ainvoke({"tour": "walk"})
+    assert 'base_url: "http://127.0.0.1:7953"' in out and "different console" not in out
+    out = await tools["atlas_record_script"].ainvoke({"tour": "walk", "base_url": "http://localhost:7870"})
+    assert out.startswith("⚠ You're recording a different console than the one you run in")
+    assert 'base_url: "http://localhost:7870"' in out
+    out = await tools["atlas_record_script"].ainvoke({"tour": "walk", "base_url": "http://localhost:7953/"})
+    assert "different console" not in out

@@ -330,8 +330,9 @@ def build_tools(service, registry, state: N.ViewerState | None = None):
         """Write a screen-recording shot script (Campaign Studio's YAML format) that records an
         Atlas tour as one continuous walkthrough: open the console, open the Atlas view, start
         the tour in record mode (autoplay, caption-style notes, no chrome), wait for it to end.
-        tour: a tour id from atlas_describe ("auto" always exists). base_url: the console's URL
-        (e.g. http://localhost:7870). color_scheme: dark | light. viewport: WIDTHxHEIGHT.
+        tour: a tour id from atlas_describe ("auto" always exists). base_url: leave it blank — the
+        script then records THIS agent's own console (the URL it is served on); pass a URL only to
+        record a different console on purpose. color_scheme: dark | light. viewport: WIDTHxHEIGHT.
         bearer_env: the NAME of an env var holding the console token, if it needs one.
         Returns the YAML plus the expected duration — hand it to the recorder unchanged."""
 
@@ -346,11 +347,21 @@ def build_tools(service, registry, state: N.ViewerState | None = None):
                 speed = transition_speed(service.conf())
             except Exception:  # noqa: BLE001 — a stub service in tests
                 pass
+            own = R.own_console_url()
+            url = base_url.strip() or own
+            if not url:
+                return f"Can't write the script: {R.BASE_URL_REQUIRED} (this agent couldn't tell its own console URL)."
+            warn = ""
+            if base_url.strip() and own and not R.same_console(base_url, own):
+                warn = (
+                    f"⚠ You're recording a different console than the one you run in: base_url {base_url.strip()} "
+                    f"is not this agent's console ({own}). Leave base_url blank to record your own.\n\n"
+                )
             text, ms, why = R.shot_script(
                 model,
                 service.current_tours(),
                 tour.strip(),
-                base_url=base_url.strip(),
+                base_url=url,
                 color_scheme=color_scheme.strip().lower(),
                 viewport=viewport,
                 speed=speed,
@@ -358,7 +369,7 @@ def build_tools(service, registry, state: N.ViewerState | None = None):
             )
             if text is None:
                 return f"Can't write the script: {why}"
-            return f"Shot script for tour {tour} — about {round(ms / 1000)} s of footage between mark start and mark end:\n\n```yaml\n{text}```"
+            return f"{warn}Shot script for tour {tour} (console {url.rstrip('/')}) — about {round(ms / 1000)} s of footage between mark start and mark end:\n\n```yaml\n{text}```"
 
         return await asyncio.to_thread(build)
 
