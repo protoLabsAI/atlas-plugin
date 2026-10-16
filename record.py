@@ -58,38 +58,38 @@ BASE_URL_REQUIRED = "base_url is required: pass the URL this agent's console is 
 def own_console_url() -> str:
     """The URL THIS agent's console is served on, or ``""`` when it can't be known for sure.
 
-    Prefers a core seam — ``graph.sdk.public_base_url()`` (protoAgent#4256 asks for it; the
-    agent-card rule of protoAgent#4255) — else applies the same rule as the A2A agent card
-    (``server/a2a.py::_a2a_card_url`` on core main): ``A2A_PUBLIC_URL`` if set, else the port
+    Prefers the core seam ``graph.sdk.console_url()`` (protoAgent#4256): ``A2A_PUBLIC_URL``,
+    else the running server's bound host/port, else ``None`` — and on a hub-spawned fleet
+    member, the member's own bound console rather than the hub's ``/agents/<id>`` tenant path
+    (which isn't a console base). On an older core without the seam it applies the A2A
+    card's rule (``server/a2a.py::_a2a_card_url``): ``A2A_PUBLIC_URL`` if set, else the port
     the running server actually bound (``STATE.active_port`` — trusted only once the server's
     event loop is up, since its class default is 7870). Never a guessed port. Lazy + guarded:
     outside a running core (tests, scripts) it's ``""``."""
     import os
 
-    env = (os.environ.get("A2A_PUBLIC_URL") or "").strip().rstrip("/")
-    running = False
-    port = None
-    try:
-        from runtime.state import STATE
-
-        running = getattr(STATE, "main_loop", None) is not None
-        port = getattr(STATE, "active_port", None)
-    except Exception:  # noqa: BLE001 — no core here
-        pass
-    if not env and not running:
-        return ""
     try:
         from graph import sdk
 
-        seam = getattr(sdk, "public_base_url", None)
-        if callable(seam):
-            url = str(seam() or "").strip().rstrip("/")
-            if url:
-                return url
-    except Exception:  # noqa: BLE001 — an older core: the card's own rule below
-        pass
+        seam = getattr(sdk, "console_url", None)
+    except Exception:  # noqa: BLE001 — no core here
+        seam = None
+    if callable(seam):
+        try:
+            return str(seam() or "").strip().rstrip("/")
+        except Exception:  # noqa: BLE001 — a broken seam: the card's own rule below
+            pass
+    env = (os.environ.get("A2A_PUBLIC_URL") or "").strip().rstrip("/")
     if env:
         return env
+    try:
+        from runtime.state import STATE
+
+        if getattr(STATE, "main_loop", None) is None:
+            return ""
+        port = getattr(STATE, "active_port", None)
+    except Exception:  # noqa: BLE001 — no core here
+        return ""
     if isinstance(port, int) and not isinstance(port, bool) and port > 0:
         return f"http://127.0.0.1:{port}"
     return ""

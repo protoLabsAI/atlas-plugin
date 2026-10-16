@@ -279,27 +279,45 @@ def test_a_blank_base_url_is_refused_never_defaulted():
     assert "localhost:7870" not in src and "127.0.0.1:7870" not in src
 
 
-def test_own_console_url(monkeypatch):
+def _no_core(monkeypatch):
     import types
 
     monkeypatch.delenv("A2A_PUBLIC_URL", raising=False)
-    # no core, or a core whose server isn't running: unknown (never the class-default 7870)
     state = types.SimpleNamespace(active_port=7870, main_loop=None)
     monkeypatch.setitem(sys.modules, "runtime", types.ModuleType("runtime"))
     monkeypatch.setitem(sys.modules, "runtime.state", types.SimpleNamespace(STATE=state))
-    monkeypatch.setitem(sys.modules, "graph", types.ModuleType("graph"))
-    monkeypatch.setitem(sys.modules, "graph.sdk", types.ModuleType("graph.sdk"))
+    graph = types.ModuleType("graph")
+    graph.sdk = types.ModuleType("graph.sdk")
+    monkeypatch.setitem(sys.modules, "graph", graph)
+    monkeypatch.setitem(sys.modules, "graph.sdk", graph.sdk)
+    return state, graph.sdk
+
+
+def test_own_console_url_on_an_older_core_uses_the_cards_rule(monkeypatch):
+    state, _ = _no_core(monkeypatch)
+    # no core, or a core whose server isn't running: unknown (never the class-default 7870)
     assert R.own_console_url() == ""
     # the running server's bound port (the agent card's rule)
     state.main_loop, state.active_port = object(), 7953
     assert R.own_console_url() == "http://127.0.0.1:7953"
-    # A2A_PUBLIC_URL wins (a deployed agent / a fleet member behind the hub)
+    # A2A_PUBLIC_URL wins (a deployed agent)
     monkeypatch.setenv("A2A_PUBLIC_URL", "https://hub.example/agents/w1/")
     assert R.own_console_url() == "https://hub.example/agents/w1"
-    # a core seam wins over both
-    sys.modules["graph.sdk"].public_base_url = lambda: "https://seam.example"
-    sys.modules["graph"].sdk = sys.modules["graph.sdk"]
-    assert R.own_console_url() == "https://seam.example"
+
+
+def test_own_console_url_prefers_the_core_console_url_seam(monkeypatch):
+    state, sdk = _no_core(monkeypatch)
+    state.main_loop, state.active_port = object(), 7953
+    monkeypatch.setenv("A2A_PUBLIC_URL", "https://hub.example/agents/w1")
+    # the seam is authoritative — e.g. a fleet member's own console, not the hub tenant path
+    sdk.console_url = lambda: "http://127.0.0.1:7960/"
+    assert R.own_console_url() == "http://127.0.0.1:7960"
+    # None from the seam means "can't be known" — never a fallback guess
+    sdk.console_url = lambda: None
+    assert R.own_console_url() == ""
+    # a seam that raises falls back to the card's rule
+    sdk.console_url = lambda: 1 / 0
+    assert R.own_console_url() == "https://hub.example/agents/w1"
 
 
 def test_same_console():

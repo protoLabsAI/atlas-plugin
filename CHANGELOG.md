@@ -2,6 +2,17 @@
 
 All notable changes to Atlas. Versions follow `version` in `protoagent.plugin.yaml`.
 
+## [0.2.2]
+
+### Changed
+
+- **`atlas_record_script` resolves its own console through core's `graph.sdk.console_url()`**
+  ([protoAgent#4256](https://github.com/protoLabsAI/protoAgent/issues/4256)) when the host has it:
+  `A2A_PUBLIC_URL`, else the running server's bound host/port — and on a hub-spawned fleet member,
+  the member's own console rather than the hub's `/agents/<id>` tenant path, which isn't a console
+  base. Older hosts keep 0.2.1's rule (`A2A_PUBLIC_URL`, else the bound port). The placeholder
+  `public_base_url` probe is gone (core never shipped it).
+
 ## [0.2.1]
 
 ### Fixed
