@@ -44,6 +44,8 @@ export type StageHandle = {
   aim: (subject: string[] | null) => void
   /** present / record: re-apply the clip to the band between the chrome and the caption (it changed) */
   reclip: () => void
+  /** a camera move (ours or LikeC4's) is under way */
+  moving: () => boolean
   /** present / record: the leaves a slide too big to show whole narrowed to (caption-named), else null */
   subject: () => string[] | null
 }
@@ -141,12 +143,12 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
     return v
   }
 
-  // present / record: NOTHING is shown partly. After a camera decision (its target viewport), every
-  // node, compound, edge and edge label that would not sit wholly inside the safe rect is faded
-  // out (data-atlas-out) — a dimmed neighbour, an edge running off screen, a label cut by the edge
+  // present / record, AT REST (the camera still for ≥ 150 ms, the end of each move): nothing is
+  // shown partly — every node, compound, edge and edge label not wholly inside the safe rect is
+  // faded out (data-atlas-out). In motion nothing is hidden for that: things move through the
+  // edges naturally (the clip keeps them off the chrome and caption).
   const culledAt = useRef(new Map<number, string>())
   const moveUntil = useRef(0)
-  const moveToken = useRef(0)
   // … and the diagram is CLIPPED to the band between the top chrome and the caption, so nothing
   // (an edge mid-move, a container border) ever draws under them, even mid-transition
   const clip = () => {
@@ -158,6 +160,13 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
     const bottom = Math.max(c.height - S.y - S.height, ins.clipBottom ?? 0)
     el.style.clipPath = `inset(${Math.max(0, S.y - 4)}px 0 ${Math.max(0, bottom - 4)}px 0)`
   }
+  const unmark = (key: number) => {
+    const sr = handles.current.get(key)?.el?.querySelector('.likec4-view')?.shadowRoot
+    for (const el of sr?.querySelectorAll('[data-atlas-out]') ?? []) el.removeAttribute('data-atlas-out')
+    culledAt.current.delete(key)
+  }
+  const unmarkRef = useRef(unmark)
+  unmarkRef.current = unmark
   const cull = (key: number, vp: { x: number; y: number; zoom: number }) => {
     if (!legible) return
     clip()
@@ -300,12 +309,9 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
       visRef.current(fromKey, srcView, { type: 'freeze' })
       visRef.current(toKey, target, { type: 'target', zoom: vpFor(target, toKey).zoom, until: Infinity })
       elA.style.willChange = elB.style.willChange = 'opacity' // composited only while fading
-      // the arriving layer is culled for its DESTINATION camera from the first frame, and again as
-      // its labels / edges render during the hand-off (the per-frame moves are instant ones)
+      // the arriving layer is culled once it has arrived (in motion, partial is natural)
       const vpDest = legible ? vpFor(target, toKey) : null
       moveUntil.current = performance.now() + 10000 // released when the hand-off ends
-      const cullTimer = vpDest ? window.setInterval(() => cull(toKey, vpDest), 120) : 0
-      if (vpDest) cull(toKey, vpDest)
 
       // the target view is committed now: the breadcrumb follows it from the move's start
       onCommitRef.current?.(target)
@@ -356,9 +362,8 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
       }
 
       elB.style.opacity = '1'
-      window.clearInterval(cullTimer)
-      moveUntil.current = performance.now() + 200
-      if (vpDest) cull(toKey, vpDest)
+      moveUntil.current = performance.now() + 150
+      if (vpDest) cull(toKey, vpDest) // at rest: the no-partial rule
       visRef.current(toKey, target, { type: 'release', now: performance.now() })
       elA.style.willChange = elB.style.willChange = '' // at rest: no layer hint → text re-rasters crisp
       delete document.documentElement.dataset.atlasTransition
@@ -409,6 +414,7 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
       ready: () => firstReady.current.promise,
       cropped: () => !!legible && !!framed(currentView(), st.current.active).cropped,
       reclip: () => clip(),
+      moving: () => performance.now() < moveUntil.current,
       subject: () => {
         if (!legible) return null
         const f = framed(currentView(), st.current.active, aimRef.current)
@@ -459,6 +465,7 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
     if (!legible) return
     let last = 0
     let lastVp = ''
+    let still = 0
     const id = window.setInterval(() => {
       const key = st.current.active
       const z = handles.current.get(key)?.xyflow?.getViewport?.().zoom
@@ -469,16 +476,20 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
       // at rest (and no programmatic move under way): re-cull for where the camera actually is —
       // a user pan / zoom, an instant move, a re-render
       const vp = handles.current.get(key)?.xyflow?.getViewport?.()
-      if (vp && settled && performance.now() > moveUntil.current) {
+      if (vp) {
         const sig = `${Math.round(vp.x)},${Math.round(vp.y)},${vp.zoom.toFixed(4)}`
-        if (lastVp === sig) cullRef.current(key, vp)
+        still = sig === lastVp ? still + 1 : 0
         lastVp = sig
+        // still (two equal ticks, ~75–150 ms) and no programmatic move under way: cull for where the
+        // camera is — through the first ~600 ms of each rest (late-rendered labels), then now and then
+        if (still >= 1 && performance.now() > moveUntil.current && (still <= 8 || culledAt.current.get(key) !== sig || still % 12 === 0)) cullRef.current(key, vp)
       }
-    }, 120)
+    }, 75)
     return () => window.clearInterval(id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [legible])
   const fadeMs = reducedMotion() ? 0 : 180
+  const dimMs = reducedMotion() ? 0 : 600
   const legibleCssFor = (key: number) => {
     const v = vis[key]
     const ms = v?.fade ? fadeMs : 0
@@ -494,7 +505,8 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
       `.likec4-element-node-data [data-likec4-node-technology]{display:block !important;${collapse(!!v?.hideDesc, '4em')}}`,
       `.likec4-edge-label-container{${hide(!!v?.hideEdgeLabels)}}`,
       // culled (wholly or partly outside the safe rect): faded out, same timing as the text
-      `.react-flow__node,.react-flow__edge{transition:opacity ${fadeMs}ms ease}`,
+      // a step's dim <-> highlight crossfades over the move (never a flash)
+      `.react-flow__node,.react-flow__edge{transition:opacity ${dimMs}ms ease,filter ${dimMs}ms ease !important}`,
       `.react-flow__node[data-atlas-out],.react-flow__edge[data-atlas-out],.likec4-edge-label-container.likec4-edge-label-container[data-atlas-out]{opacity:0 !important;pointer-events:none !important;transition:opacity ${fadeMs}ms ease !important}`,
       // hidden small text comes back on the node that has keyboard focus or is selected (and the
       // node's accessible name always carries its description)
@@ -561,20 +573,9 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
                   (zoom: number, ms: number, vp?: any) => {
                     moveUntil.current = Math.max(moveUntil.current, performance.now() + ms + 80)
                     visRef.current(l.key, l.viewId, { type: 'target', zoom, until: performance.now() + ms + 80 })
-                    if (vp) {
-                      cullRef.current(l.key, vp)
-                      // labels / edges render (or grow to full size) only part-way through a move —
-                      // a layer just mounted, LikeC4's small-zoom label form: keep judging them
-                      // against the same TARGET until the move lands, so they fade out en route
-                      const token = ++moveToken.current
-                      const end = performance.now() + ms
-                      const again = () => {
-                        if (token !== moveToken.current) return
-                        cullRef.current(l.key, vp)
-                        if (performance.now() < end) window.setTimeout(again, 120)
-                      }
-                      window.setTimeout(again, 60)
-                    }
+                    // in motion nothing is hidden for being partial: it moves through the edges
+                    // (the clip still keeps it off the chrome / caption); the rest cull decides
+                    if (vp) unmarkRef.current(l.key)
                   },
                   legible
                     ? (vp: any) => {
@@ -587,6 +588,11 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
                         return vpFor(l.viewId, l.key, aimRef.current)
                       }
                     : undefined,
+                  !!legible, // present / record: LikeC4's moves fly (one eased van Wijk path)
+                  (vp: any) => {
+                    moveUntil.current = performance.now()
+                    cullRef.current(l.key, vp)
+                  },
                 )
                 if (legible && l.key === 0) {
                   // the first layer: LikeC4 fitted the WHOLE view; frame it legibly instead

@@ -231,6 +231,10 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
       setWalkNow(0)
       if (!same) await goView(s.view)
       await applySlideDetail(s, same)
+      // the slide has ARRIVED when its camera (a focus ease, a walkthrough step) has landed — the
+      // caption fades in then, and a recording's dwell starts then
+      await sleep(80)
+      for (let i = 0; i < 100 && stage.current?.moving(); i++) await sleep(40)
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [applySlideDetail],

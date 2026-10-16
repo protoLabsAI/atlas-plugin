@@ -2,9 +2,9 @@
 // script does (Atlas rail → docks collapsed → Tour options → Record), then, while the take plays:
 //  - every ~100 ms (mid-transition included): nothing visible draws under the top chrome or the
 //    caption (element rect ∩ the stage's clip, against the measured breadcrumb / caption); the
-//    breadcrumb shows the slide's target view within 300 ms of the slide change; and wherever the
-//    picture STOPS (≥ 300 ms without motion), in any layer, nothing is partial or clip-cut — an
-//    intermediate view never sits on screen cropped;
+//    breadcrumb shows the slide's target view within 300 ms of the slide change; wherever the
+//    picture STOPS (≥ 150 ms without motion), in any layer, nothing is partial or clip-cut; and no
+//    frame is (nearly) empty — mid-move, at least min(source, target) nodes are drawn;
 //  - at each settled slide / step: every visible node, compound, edge and edge-label chip is wholly
 //    inside the safe rect (or off canvas / faded out), the content is centred (±5 %), and the
 //    slide's SUBJECT is complete (its focus / step ends, else every leaf of the view);
@@ -66,6 +66,7 @@ const sample = () => frame.evaluate(() => {
   const S = { x: side - 1, y: chromeBottom + 8 - 1, x2: W - side + 1, y2: capTop - 12 + 1 }
   const seen = (el, sr) => { for (let e = el; e && e !== sr; e = e.parentElement) if (+getComputedStyle(e).opacity < 0.05) return false; return true }
   const sig = []
+  let nodesVisible = 0 // leaves drawn at all (any layer, partly too)
   const badAll = [] // any visible layer (an in-flight one too)
   const under = [] // mid-move rule: nothing visible under the chrome / caption
   const bad = []
@@ -87,11 +88,13 @@ const sample = () => frame.evaluate(() => {
       if (!(r.width > 0 && r.height > 0)) continue
       if (layer === active && kind === 'node') leaves.push(id)
       if (!seen(el, sr)) continue
+      if (el.hasAttribute('data-atlas-out')) continue // decided at rest: fading out
       const b = { id: `${kind}:${id}`, x: r.left - root.left, y: r.top - root.top, x2: r.right - root.left, y2: r.bottom - root.top }
       // the part actually drawn: inside the canvas and the stage clip
       const vy = Math.max(b.y, clipTop, 0), vy2 = Math.min(b.y2, clipBottom, H)
       const vx = Math.max(b.x, 0), vx2 = Math.min(b.x2, W)
       if (vy2 <= vy || vx2 <= vx) continue
+      if (kind === 'node') nodesVisible++
       if (vy < chromeBottom - 0.5 || vy2 > capTop + 0.5) under.push(`${b.id} ${Math.round(vy)}–${Math.round(vy2)}`)
       const inS = b.x >= S.x && b.y >= S.y && b.x2 <= S.x2 && b.y2 <= S.y2
       sig.push(`${Math.round(b.x)},${Math.round(b.y)},${Math.round(b.x2)}`)
@@ -111,7 +114,7 @@ const sample = () => frame.evaluate(() => {
   return {
     state: document.querySelector('[data-atlas-state]')?.getAttribute('data-atlas-state'),
     slide: P.slide + 1, walk: P.walk, view: P.view, busy: P.busy, under, bad, missing, shown: shown.length,
-    crumb: P.crumb, target: P.target, sig: sig.join('|'), badAll, layers: document.querySelectorAll('.layer').length,
+    crumb: P.crumb, target: P.target, nodesVisible, sig: sig.join('|'), badAll, layers: document.querySelectorAll('.layer').length,
     off: { x: Math.round(cx - sc.x), y: Math.round(cy - sc.y), tolX: Math.round((S.x2 - S.x) * 0.05), tolY: Math.round((S.y2 - S.y) * 0.05) },
   }
 })
@@ -122,6 +125,9 @@ let underFails = 0
 let samples = 0
 let crumbFails = 0
 let crumbChecked = 0
+let emptyFails = 0
+let restCount = null
+const inFlight = []
 const flight = []
 const FLIGHT = +arg('--flight-slide', '2')
 let stopFails = 0
@@ -147,18 +153,32 @@ while (Date.now() - t0 < 180000) {
   if (s.target && s.crumb !== s.target && Date.now() - since > 300) {
     if (++crumbFails <= 6) console.log(`FAIL ${tl} stale breadcrumb: shows ${s.crumb}, going to ${s.target} (${Date.now() - since} ms after the change)`)
   }
-  // the picture stopped (no motion for ≥ 300 ms): every visible layer obeys the framing rules
+  // the picture stopped (no motion for ≥ 150 ms — two equal samples): every visible layer obeys
+  // the framing rules. In motion, partial is natural (things move through the edges).
   still = s.sig === prevSig ? still + 1 : 0
   prevSig = s.sig
-  if (still === 3 && s.badAll.length) {
+  if (still === 2 && s.badAll.length) {
     stopFails++
     if (stopFails <= 6) console.log(`FAIL ${tl} the picture stopped with something partial / cut (${s.busy ? 'mid-move' : 'at rest'}, ${s.layers} layer(s)): ${s.badAll.slice(0, 4).join('; ')}`)
   }
   if (s.target) crumbChecked++
+  // no empty frames: between two resting pictures every sample draws ≥ min(their node counts)
+  if (!s.busy && still >= 2) {
+    if (restCount != null) {
+      const floor = Math.min(restCount, s.nodesVisible)
+      // a view change (two layers: a zoom through a portal, a crossfade) has the parent's nodes
+      // leave through the edges — natural; it may only never go blank. A same-view move (a step,
+      // a focus) keeps at least the smaller of the two pictures on screen throughout.
+      for (const m of inFlight) if (m.n < (m.layers > 1 ? 1 : floor)) { emptyFails++; if (emptyFails <= 6) console.log(`FAIL ${m.tl} near-empty frame: ${m.n} node(s) drawn, the pictures either side have ${restCount} / ${s.nodesVisible}`) }
+    }
+    restCount = s.nodesVisible
+    inFlight.length = 0
+  } else inFlight.push({ n: s.nodesVisible, tl, layers: s.layers })
   // a filmstrip of one move (the change INTO --flight-slide, default 2): every other sample
-  if (s.slide === FLIGHT && s.busy && flight.length < 14 && samples % 2 === 0)
+  if (s.slide === FLIGHT && (s.busy || still < 2) && Date.now() - since < 3000 && flight.length < 16)
     flight.push({ label: `t+${Date.now() - since} ms · crumb ${s.crumb}`, b64: (await page.screenshot({ type: 'jpeg', quality: 70 })).toString('base64') })
-  if (!s.busy && !done.has(key) && Date.now() - since > 1500) {
+  // settled: the slide's own camera has come to rest (≥ 500 ms still, the rest-cull's fade done)
+  if (!s.busy && still >= 5 && !done.has(key) && Date.now() - since > 1500) {
     done.add(key)
     const centred = Math.abs(s.off.x) <= s.off.tolX && Math.abs(s.off.y) <= s.off.tolY
     const ok = !s.bad.length && !s.missing.length && centred && s.shown > 0
@@ -176,6 +196,6 @@ if (flight.length) {
   await sp.setContent(`<body style="margin:0;background:#111;color:#ddd;font:15px system-ui;display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:6px">${flight.map((f) => `<figure style="margin:0"><img style="width:100%;display:block" src="data:image/jpeg;base64,${f.b64}"><figcaption style="padding:2px 0 6px">${f.label}</figcaption></figure>`).join('')}</body>`)
   await sp.screenshot({ path: SHEET.replace(/\.png$/, '-flight.png'), fullPage: true })
 }
-console.log(`${frames.length - failures}/${frames.length} settled frames pass · ${samples - underFails}/${samples} samples clear of chrome/caption · ${crumbFails} stale-breadcrumb samples (of ${crumbChecked}) · ${stopFails} cropped stops${errs.length ? '\n' + errs.join('\n') : ''}`)
+console.log(`${frames.length - failures}/${frames.length} settled frames pass · ${samples - underFails}/${samples} samples clear of chrome/caption · ${crumbFails} stale-breadcrumb samples (of ${crumbChecked}) · ${stopFails} cropped stops · ${emptyFails} near-empty frames${errs.length ? '\n' + errs.join('\n') : ''}`)
 await browser.close()
-process.exit(failures || underFails || crumbFails || stopFails ? 1 : 0)
+process.exit(failures || underFails || crumbFails || stopFails || emptyFails ? 1 : 0)
