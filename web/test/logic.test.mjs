@@ -250,3 +250,12 @@ test('keyboard ownership: graph shortcuts never steal Tab / Enter / Space from c
   for (const k of ['Enter', 'ArrowRight', '.', 'Escape']) assert.equal(presenterOwns(k, onGraph), true, k)
   assert.equal(presenterOwns('Tab', onGraph), false)
 })
+
+test('cleanTours / toursFor keep a LIST focus (#5): node ids in the view, one left → a string', async () => {
+  const { cleanTours, toursFor } = await import('../src/logic.mjs')
+  const data = { views: { index: { id: 'index', nodes: [{ id: 'a' }, { id: 'b' }, { id: 'c' }], edges: [] } } }
+  const doc = { tours: [{ id: 't', slides: [{ view: 'index', focus: ['a', 'b'] }, { view: 'index', focus: ['a', 'nope'] }, { view: 'index', focus: ['nope'] }, { view: 'index', focus: 'c' }] }] }
+  const [t] = cleanTours(doc, data)
+  assert.deepEqual(t.slides.map((s) => s.focus), [['a', 'b'], 'a', undefined, 'c'])
+  assert.deepEqual(toursFor(doc, data)[0].slides[0].focus, ['a', 'b'])
+})

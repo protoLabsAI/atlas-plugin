@@ -223,7 +223,7 @@ def test_walked_steps_are_captioned_and_timed():
     assert R.step_caption(view, {"source": "a", "target": "zz.c"}) == "Console → c"
 
 
-def test_a_dive_straight_down_is_one_zoom_per_level():
+def test_a_dive_of_several_levels_is_one_move():
     model = {
         "views": {
             "index": {"id": "index", "_type": "element", "nodes": [{"id": "s", "navigateTo": "s_d"}]},
@@ -232,8 +232,8 @@ def test_a_dive_straight_down_is_one_zoom_per_level():
         }
     }
     assert R.view_chain(model, "c_d") == ["index", "s_d", "c_d"]
-    assert R.view_change_ms(model, "index", "c_d") == 2 * R.VIEW_CHANGE_MS  # two zooms in
-    assert R.view_change_ms(model, "c_d", "index") == R.VIEW_CHANGE_MS  # one move out
+    assert R.view_change_ms(model, "index", "c_d") == R.DIVE_CHANGE_MS  # one continuous dive down
+    assert R.view_change_ms(model, "c_d", "index") == R.DIVE_CHANGE_MS  # … and up
     assert R.view_change_ms(model, "s_d", "c_d") == R.VIEW_CHANGE_MS
 
 
@@ -247,3 +247,15 @@ def test_lint_flags_hand_picked_steps_that_skip(tmp_path):
     assert not [
         f for f in L.lint(MODEL, {"tours": [{"id": "t", "slides": ok}]}, tmp_path) if f["rule"] == "tour-step-skip"
     ]
+
+
+def test_auto_tour_notes_match_the_viewer_so_the_timing_does():
+    # the viewer's autoTour captions each slide `title — description` and dwells on that; the
+    # backend's auto tour (atlas_record_script tour="auto") carries the same notes
+    auto = L.auto_tour(MODEL)
+    for s in auto["slides"]:
+        v = L.views(MODEL)[s["view"]]
+        d = v.get("description")
+        d = (d.get("md") or d.get("txt")) if isinstance(d, dict) else d
+        assert s["note"] == " — ".join(x for x in (v.get("title") or s["view"], (d or "").strip()) if x)
+    assert R.timeline(MODEL, auto["slides"])[0] == R.VIEW_CHANGE_MS + R.slide_dwell_ms(auto["slides"][0])

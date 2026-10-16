@@ -152,7 +152,9 @@ export function cleanTours(tours, data) {
       if (!v) continue
       const slide = { view: s.view, note: typeof s.note === 'string' ? s.note : '' }
       if (Number.isInteger(s.step) && s.step >= 1 && s.step <= dynamicSteps(v).length) slide.step = s.step
-      if (typeof s.focus === 'string' && v.nodes?.some((n) => n.id === s.focus)) slide.focus = s.focus
+      // focus: one element or several (each must be a node in the view; one left → a string)
+      const focus = (Array.isArray(s.focus) ? s.focus : [s.focus]).filter((f) => typeof f === 'string' && v.nodes?.some((n) => n.id === f))
+      if (focus.length) slide.focus = focus.length === 1 ? focus[0] : [...new Set(focus)]
       if (typeof s.via === 'string') slide.via = s.via
       if (Number.isInteger(s.hold_ms) && s.hold_ms >= 500 && s.hold_ms <= 60000) slide.hold_ms = s.hold_ms
       slides.push(slide)

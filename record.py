@@ -41,6 +41,7 @@ BEAT_MS = 1000  # the clean diagram, no caption, before tour-done (tour `end_bea
 # (measured in-console: dev/console-framing.mjs prints the take's presenting → tour-done time)
 VIEW_CHANGE_MS = 1200
 SAME_VIEW_MS = 900
+DIVE_CHANGE_MS = 1900  # a dive of several levels: DIVE_MS 1600 + mounting the levels
 SPEED = {"slow": 1.6, "normal": 1.0, "fast": 0.6}
 MAX_WAIT_MS = 180_000  # Campaign's per-step ceiling
 TAIL_MARGIN_MS = 20_000  # slack on each wait for camera drift / a slow machine
@@ -163,12 +164,14 @@ def view_chain(model: dict, view_id: str) -> list[str]:
 
 
 def view_change_ms(model: dict, prev: str | None, view: str) -> int:
-    """A view change at normal speed: one move (a zoom through a portal, or one crossfade-zoom for a
-    cousin / a jump up), except a dive straight down several levels — one zoom per level."""
-    chain = view_chain(model, view)
-    if prev in chain:
-        return VIEW_CHANGE_MS * max(1, len(chain) - chain.index(prev) - 1)
-    return VIEW_CHANGE_MS
+    """A view change at normal speed: one move — a zoom through a portal, one crossfade-zoom for a
+    cousin, or one continuous dive (every level's zoom on a single timeline) straight down / up
+    several levels."""
+    if prev is None:
+        return VIEW_CHANGE_MS
+    down, up = view_chain(model, view), view_chain(model, prev)
+    levels = len(down) - down.index(prev) - 1 if prev in down else (len(up) - up.index(view) - 1 if view in up else 0)
+    return DIVE_CHANGE_MS if levels > 1 else VIEW_CHANGE_MS
 
 
 def timeline(

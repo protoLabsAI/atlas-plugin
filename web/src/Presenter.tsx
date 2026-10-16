@@ -540,6 +540,11 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
         return lastAim.current
       },
       /** the view the breadcrumb shows / the view the current slide is going to */
+      /** the current slide's focus (one id, a list, or null) */
+      get focus() {
+        const f = (adhocRef.current ? adhocNow.current : tour[st.current.slide])?.focus
+        return f ?? null
+      },
       get subject() {
         return stage.current?.subject() ?? null
       },

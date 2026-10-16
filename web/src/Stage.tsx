@@ -16,7 +16,7 @@ import type { LikeC4Model } from '@likec4/core/model'
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { frameSlide, safeRect } from './framing.mjs'
 import { fitBox, interpolateZoom, parentView, viewChain, visInit, visReduce } from './logic.mjs'
-import { FADE_MS, JUMP_MS, ZOOM_MS, easeInOutCubic, factor, patchCamera, reducedMotion } from './motion'
+import { DIVE_MS, FADE_MS, JUMP_MS, ZOOM_MS, easeInOutCubic, factor, patchCamera, reducedMotion } from './motion'
 
 type Box = { x: number; y: number; width: number; height: number }
 type Viewport = { x: number; y: number; zoom: number }
@@ -273,7 +273,7 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
   const currentView = () => st.current.layers.find((l) => l.key === st.current.active)?.viewId ?? initialView
 
   const transition = useCallback(
-    async (target: string, jump = false, chained = false) => {
+    async (target: string, jump = false) => {
       const fromKey = st.current.active
       const srcView = currentView()
       if (srcView === target || !views.has(target)) return
@@ -314,7 +314,7 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
       moveUntil.current = performance.now() + 10000 // released when the hand-off ends
 
       // the target view is committed now: the breadcrumb follows it from the move's start
-      if (!chained) onCommitRef.current?.(target)
+      onCommitRef.current?.(target)
       if (kind === 'fade') {
         const vpB = vpFor(target, toKey)
         const vpA = A.xyflow.getViewport()
@@ -378,6 +378,97 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
     [views, parentOf, portalFor, pad, legible, insetsFn],
   )
 
+  // several levels straight down (or up): ONE continuous dive — every level's zoom-through-the-portal
+  // chained on a single eased timeline (DIVE_MS in all). The intermediate views are mounted up front
+  // and only ever seen in flight; the breadcrumb is on the destination from the start.
+  const dive = useCallback(
+    async (levels: string[], dir: 'in' | 'out') => {
+      // levels: [current, …, target]; for 'in' each next is the previous one's child, for 'out' its parent
+      const fromKey = st.current.active
+      const A = handles.current.get(fromKey)
+      if (!A?.xyflow || levels.length < 3) return
+      const keys = [fromKey, ...levels.slice(1).map(() => ++keySeq.current)]
+      const added = levels.slice(1).map((v, i) => ({ key: keys[i + 1], viewId: v }))
+      st.current = { ...st.current, layers: [...st.current.layers, ...added] }
+      setLayers((ls) => [...ls, ...added])
+      onCommitRef.current?.(levels[levels.length - 1])
+      for (const k of keys.slice(1)) await readyOf(k).promise
+      await nextFrame()
+      await sleep(80) // let the fresh diagrams finish their own initial fit
+      const W = stage.current!.clientWidth
+      const H = stage.current!.clientHeight
+      const full: Box = { x: 0, y: 0, width: W, height: H }
+      const FR = fullRect()
+      // depth order, outermost first: parents[i] holds the portal into parents[i + 1]
+      const order = dir === 'in' ? levels.map((v, i) => ({ v, key: keys[i] })) : levels.map((v, i) => ({ v, key: keys[i] })).reverse()
+      const segs = order.slice(0, -1).map((P, i) => {
+        const C = order[i + 1]
+        const portal = portalFor(P.v, C.v)
+        const node = views.get(P.v)?.nodes?.find((n: any) => n.id === portal) as Box | undefined
+        const vpP0 = dir === 'in' && i === 0 ? A.xyflow.getViewport() : vpFor(P.v, P.key)
+        const childBounds = canvasBox(dir === 'out' && i === order.length - 2 ? A.xyflow.getViewport() : vpFor(C.v, C.key))
+        return { P: handles.current.get(P.key)!, C: handles.current.get(C.key)!, node, vpP0, childBounds }
+      })
+      if (segs.some((g) => !g.node || !g.P?.xyflow || !g.C?.xyflow)) {
+        // a level without a portal: fall back to one crossfade-zoom to the target
+        st.current = { ...st.current, layers: st.current.layers.filter((l) => !added.some((a) => a.key === l.key)) }
+        setLayers((ls) => ls.filter((l) => !added.some((a) => a.key === l.key)))
+        return transition(levels[levels.length - 1], true)
+      }
+      const zis = segs.map((g) => interpolateZoom(1.0)(toView(g.vpP0, W, H), toView(fitBox(g.node!, full, Math.min(W, H) * 0.03, 12), W, H)))
+      order.forEach((o, i) => {
+        const el = handles.current.get(o.key)!.el!
+        el.style.zIndex = String(2 + i) // deeper on top
+        el.style.willChange = 'opacity'
+      })
+      document.documentElement.dataset.atlasTransition = dir
+      const target = levels[levels.length - 1]
+      const toKey = keys[keys.length - 1]
+      visRef.current(fromKey, levels[0], { type: 'freeze' })
+      for (const o of order) if (o.key !== fromKey) visRef.current(o.key, o.v, { type: 'target', zoom: vpFor(o.v, o.key).zoom, until: Infinity })
+      moveUntil.current = performance.now() + 10000
+      const n = segs.length
+      const segFrame = (i: number, t: number) => {
+        const g = segs[i]
+        const vp = viewToVp(zis[i](t), W, H)
+        g.P.xyflow.setViewport(vp)
+        const node = g.node!
+        const nodeRect: Box = { x: node.x * vp.zoom + vp.x, y: node.y * vp.zoom + vp.y, width: node.width * vp.zoom, height: node.height * vp.zoom }
+        const k = t ** 2
+        const rect: Box = { x: lerp(nodeRect.x, 0, k), y: lerp(nodeRect.y, 0, k), width: lerp(nodeRect.width, FR.width, k), height: lerp(nodeRect.height, FR.height, k) }
+        g.C.xyflow.setViewport(fitBox(g.childBounds, rect, lerp(nodeRect.width * 0.06, 0, k)))
+        const a = smoothstep(0.4, 0.88, t)
+        order.forEach((o, j) => {
+          const el = handles.current.get(o.key)!.el!
+          el.style.opacity = j === i ? String(1 - a) : j === i + 1 ? String(a) : '0'
+        })
+      }
+      // one eased timeline over all the levels: T (0 → 1, the camera's depth) → segment + local t
+      await animate(
+        DIVE_MS * factor(),
+        (T) => {
+          const x = Math.min(n, Math.max(0, T * n)) // (the ease can overshoot by a hair)
+          const i = Math.min(n - 1, Math.floor(x))
+          segFrame(i, Math.min(1, Math.max(0, x - i)))
+        },
+        dir === 'out',
+      )
+      const B = handles.current.get(toKey)!
+      B.el!.style.opacity = '1'
+      moveUntil.current = performance.now() + 150
+      if (legible) cull(toKey, vpFor(target, toKey))
+      visRef.current(toKey, target, { type: 'release', now: performance.now() })
+      for (const o of order) handles.current.get(o.key)!.el!.style.willChange = ''
+      delete document.documentElement.dataset.atlasTransition
+      st.current = { active: toKey, layers: [{ key: toKey, viewId: target }] }
+      setActive(toKey)
+      setLayers((ls) => ls.filter((l) => l.key === toKey))
+      for (const k of keys) if (k !== toKey) (handles.current.delete(k), ready.current.delete(k))
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [views, parentOf, portalFor, pad, legible, insetsFn, transition],
+  )
+
   const goNow = useCallback(
     async (target: string) => {
       if (currentView() === target || !views.has(target)) return
@@ -387,11 +478,10 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
       while (common < from.length && common < to.length && from[common] === to[common]) common++
       const path = common > 0 ? [...from.slice(common - 1, -1).reverse(), ...to.slice(common)] : [target]
       const hops = path.filter((v) => v !== currentView())
-      // straight down (a grandchild): zoom through each portal in turn, one continuous dive — the
-      // breadcrumb shows the destination from the start and no level is held
-      if (hops.length > 1 && common === from.length) {
-        onCommitRef.current?.(target)
-        for (const v of hops) await transition(v, false, true)
+      // straight down (a grandchild) or straight up (a grandparent): ONE continuous dive through
+      // every level's portal
+      if (hops.length > 1 && !reducedMotion() && (common === from.length || common === to.length)) {
+        await dive([currentView(), ...hops], common === from.length ? 'in' : 'out')
         return
       }
       // parent ↔ child: the zoom through the portal. Anything else further (a cousin, a jump up
@@ -399,7 +489,7 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
       // intermediate view ever "arrives"
       await transition(target, hops.length > 1)
     },
-    [chain, transition],
+    [chain, transition, dive],
   )
 
   useImperativeHandle(

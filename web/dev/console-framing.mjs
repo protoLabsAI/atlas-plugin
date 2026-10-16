@@ -48,8 +48,17 @@ await frame.getByRole('button', { name: 'Tour options' }).click()
 const TOUR_TITLE = arg('--tour-title', '')
 await frame.getByRole('menuitem', { name: TOUR_TITLE ? `Record — ${TOUR_TITLE}` : /^Record/, exact: !!TOUR_TITLE }).first().click()
 await frame.waitForSelector('[data-atlas-state=presenting]', { timeout: 10000 })
+// the tour as authored, for the highlight check
+let AUTHORED = []
+try {
+  const m = await (await fetch(`${HOST}/api/plugins/atlas/model`, { headers: TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {} })).json()
+  const list = Array.isArray(m.tours) ? m.tours : m.tours?.tours ?? []
+  AUTHORED = (TOUR_TITLE ? list.find((t) => t.title === TOUR_TITLE) : list[0])?.slides ?? []
+} catch (e) {
+  console.log('(no authored tour: the highlight check is skipped)', e.message)
+}
 
-const sample = () => frame.evaluate(() => {
+const sample = () => frame.evaluate((authored) => {
   const P = window.__present
   const root = document.querySelector('.presenter')?.getBoundingClientRect()
   if (!P || !root) return null
@@ -78,6 +87,13 @@ const sample = () => frame.evaluate(() => {
     if (+getComputedStyle(layer).opacity < 0.05) continue
     const sr = layer.querySelector('.likec4-view')?.shadowRoot
     if (!sr) continue
+    // the CAMERA: each visible layer's viewport transform (not node boxes — LikeC4's dim / highlight
+    // animates those without the camera moving)
+    const vpEl = sr.querySelector('.react-flow__viewport')
+    // (exact: a slow ease tail still counts as moving; whether a change after a stop is a real
+    // RESUME — not a sub-pixel settle onto the framing — is judged from the numbers, below)
+    const m = /translate\(([-\d.]+)px,\s*([-\d.]+)px\)\s*scale\(([-\d.]+)\)/.exec(vpEl?.style.transform || '')
+    if (m) sig.push(`${+m[1]},${+m[2]},${+m[3]}`)
     const els = [
       ...[...sr.querySelectorAll('.react-flow__node')].map((el) => ({ el, r: el, kind: el.querySelector('.likec4-compound-node') ? 'compound' : 'node', id: el.dataset.id })),
       ...[...sr.querySelectorAll('.react-flow__edge')].map((el) => ({ el, r: el, kind: 'edge', id: el.dataset.id })),
@@ -97,7 +113,6 @@ const sample = () => frame.evaluate(() => {
       if (kind === 'node') nodesVisible++
       if (vy < chromeBottom - 0.5 || vy2 > capTop + 0.5) under.push(`${b.id} ${Math.round(vy)}–${Math.round(vy2)}`)
       const inS = b.x >= S.x && b.y >= S.y && b.x2 <= S.x2 && b.y2 <= S.y2
-      sig.push(`${Math.round(b.x)},${Math.round(b.y)},${Math.round(b.x2)}`)
       if (b.y < clipTop - 0.5 || b.y2 > clipBottom + 0.5 || !inS) badAll.push(`${layer.dataset.view} ${b.id}`)
       if (layer !== active) continue
       // drawn only in part (cut by the stage clip)?
@@ -105,6 +120,19 @@ const sample = () => frame.evaluate(() => {
       if (!inS) bad.push(`${b.id} ${Math.round(b.x)},${Math.round(b.y)}–${Math.round(b.x2)},${Math.round(b.y2)}${el.hasAttribute('data-atlas-out') ? ' (marked out, op ' + getComputedStyle(el).opacity + ')' : ''} S=${Math.round(S.x)},${Math.round(S.y)}–${Math.round(S.x2)},${Math.round(S.y2)}`)
       else if (kind === 'node' || kind === 'compound') { shown.push(b); visibleIds.add(id) }
     }
+  }
+  // a LIST focus (#5): exactly those nodes lit, every other leaf dimmed
+  let litWrong = null
+  // the AUTHORED focus (from the tours file the host serves — not the viewer's own reading of it)
+  const focus = authored[P.slide]?.focus
+  if (Array.isArray(focus) && focus.length > 1 && active && !P.walk) {
+    const asr = active.querySelector('.likec4-view')?.shadowRoot
+    const lit = [...(asr?.querySelectorAll('.react-flow__node') ?? [])]
+      .filter((el) => !el.querySelector('.likec4-compound-node') && +getComputedStyle(el).opacity > 0.6)
+      .map((el) => el.dataset.id)
+      .sort()
+    const want = [...focus].sort()
+    if (lit.join() !== want.join()) litWrong = `lit ${lit.join(', ') || '—'} ≠ focus ${want.join(', ')}`
   }
   const subject = P.aim ?? P.subject ?? leaves // a focus / step, a caption-named narrowing, else the whole view
   const missing = subject.filter((id) => !visibleIds.has(id))
@@ -114,10 +142,10 @@ const sample = () => frame.evaluate(() => {
   return {
     state: document.querySelector('[data-atlas-state]')?.getAttribute('data-atlas-state'),
     slide: P.slide + 1, walk: P.walk, view: P.view, busy: P.busy, under, bad, missing, shown: shown.length,
-    crumb: P.crumb, target: P.target, nodesVisible, sig: sig.join('|'), badAll, layers: document.querySelectorAll('.layer').length,
+    crumb: P.crumb, target: P.target, nodesVisible, litWrong, sig: sig.join('|'), badAll, layers: document.querySelectorAll('.layer').length,
     off: { x: Math.round(cx - sc.x), y: Math.round(cy - sc.y), tolX: Math.round((S.x2 - S.x) * 0.05), tolY: Math.round((S.y2 - S.y) * 0.05) },
   }
-})
+}, AUTHORED)
 
 const frames = []
 let failures = 0
@@ -125,6 +153,11 @@ let underFails = 0
 let samples = 0
 let crumbFails = 0
 let crumbChecked = 0
+let pauseFails = 0
+let moveKey = ''
+let moveStarted = false
+let lastSampleAt = 0
+let slowSince = 0
 let emptyFails = 0
 let restCount = null
 const inFlight = []
@@ -153,6 +186,33 @@ while (Date.now() - t0 < 180000) {
   if (s.target && s.crumb !== s.target && Date.now() - since > 300) {
     if (++crumbFails <= 6) console.log(`FAIL ${tl} stale breadcrumb: shows ${s.crumb}, going to ${s.target} (${Date.now() - since} ms after the change)`)
   }
+  // a move never pauses part-way: once the picture has started moving for this slide / step, a
+  // stationary spell > 150 ms followed by more motion is a mid-move stop (a level held in a dive)
+  // (the stationary spell is measured conservatively: from the first to the last sample that saw
+  // the same picture — samples are ~100 ms apart, so one repeat alone can't fail it)
+  const now = Date.now()
+  if (key !== moveKey) { moveKey = key; moveStarted = false; slowSince = 0 }
+  // camera speed between samples: SLOW = every visible layer moved < 2 px (zoom < 0.5 %); a move
+  // that goes fast, then slow for > 150 ms, then fast again PAUSED part-way (a level held between
+  // two zooms — even when it never quite stops, the deceleration + re-acceleration reads as a stop)
+  const nums = (g) => (g ? g.split('|').map((v) => v.split(',').map(Number)) : [])
+  const slowStep = (a, b) => {
+    const A = nums(a), B = nums(b)
+    if (!A.length || A.length !== B.length) return false
+    return A.every((v, i) => Math.abs(v[0] - B[i][0]) < 2 && Math.abs(v[1] - B[i][1]) < 2 && Math.abs(v[2] / B[i][2] - 1) < 0.005)
+  }
+  if (process.env.DEBUG_SIG && s.slide === +process.env.DEBUG_SIG) console.log(`SIG ${now - since} busy=${s.busy} ${s.sig.slice(0, 140)}`)
+  if (prevSig) {
+    if (!slowStep(s.sig, prevSig)) {
+      if (moveStarted && slowSince && lastSampleAt - slowSince > 150) {
+        pauseFails++
+        if (pauseFails <= 6) console.log(`FAIL ${tl} the camera paused ≥ ${lastSampleAt - slowSince} ms mid-move`)
+      }
+      moveStarted = true // it has gone fast once
+      slowSince = 0
+    } else if (moveStarted && !slowSince) slowSince = lastSampleAt
+  }
+  lastSampleAt = now
   // the picture stopped (no motion for ≥ 150 ms — two equal samples): every visible layer obeys
   // the framing rules. In motion, partial is natural (things move through the edges).
   still = s.sig === prevSig ? still + 1 : 0
@@ -181,10 +241,10 @@ while (Date.now() - t0 < 180000) {
   if (!s.busy && still >= 5 && !done.has(key) && Date.now() - since > 1500) {
     done.add(key)
     const centred = Math.abs(s.off.x) <= s.off.tolX && Math.abs(s.off.y) <= s.off.tolY
-    const ok = !s.bad.length && !s.missing.length && centred && s.shown > 0
+    const ok = !s.bad.length && !s.missing.length && centred && s.shown > 0 && !s.litWrong
     if (!ok) failures++
     const label = `slide ${s.slide}${s.walk ? ` · step ${s.walk}` : ''} · ${s.view}`
-    console.log(`${ok ? 'PASS' : 'FAIL'} ${label} — ${s.shown} shown, off-centre ${s.off.x},${s.off.y}${s.missing.length ? ', SUBJECT MISSING: ' + s.missing.join(', ') : ''}${s.bad.length ? ', PARTIAL/OUTSIDE: ' + s.bad.join('; ') : ''}`)
+    console.log(`${ok ? 'PASS' : 'FAIL'} ${label} — ${s.shown} shown, off-centre ${s.off.x},${s.off.y}${s.missing.length ? ', SUBJECT MISSING: ' + s.missing.join(', ') : ''}${s.litWrong ? ', HIGHLIGHT: ' + s.litWrong : ''}${s.bad.length ? ', PARTIAL/OUTSIDE: ' + s.bad.join('; ') : ''}`)
     frames.push({ label: `${ok ? '✓' : '✗'} ${label}`, b64: (await page.screenshot({ type: 'jpeg', quality: 72 })).toString('base64') })
   }
   await page.waitForTimeout(100)
@@ -196,6 +256,6 @@ if (flight.length) {
   await sp.setContent(`<body style="margin:0;background:#111;color:#ddd;font:15px system-ui;display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:6px">${flight.map((f) => `<figure style="margin:0"><img style="width:100%;display:block" src="data:image/jpeg;base64,${f.b64}"><figcaption style="padding:2px 0 6px">${f.label}</figcaption></figure>`).join('')}</body>`)
   await sp.screenshot({ path: SHEET.replace(/\.png$/, '-flight.png'), fullPage: true })
 }
-console.log(`${frames.length - failures}/${frames.length} settled frames pass · ${samples - underFails}/${samples} samples clear of chrome/caption · ${crumbFails} stale-breadcrumb samples (of ${crumbChecked}) · ${stopFails} cropped stops · ${emptyFails} near-empty frames${errs.length ? '\n' + errs.join('\n') : ''}`)
+console.log(`${frames.length - failures}/${frames.length} settled frames pass · ${samples - underFails}/${samples} samples clear of chrome/caption · ${crumbFails} stale-breadcrumb samples (of ${crumbChecked}) · ${stopFails} cropped stops · ${emptyFails} near-empty frames · ${pauseFails} mid-move pauses${errs.length ? '\n' + errs.join('\n') : ''}`)
 await browser.close()
-process.exit(failures || underFails || crumbFails || stopFails || emptyFails ? 1 : 0)
+process.exit(failures || underFails || crumbFails || stopFails || emptyFails || pauseFails ? 1 : 0)

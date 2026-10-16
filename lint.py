@@ -115,16 +115,25 @@ def auto_tour(model: dict | None) -> dict:
     """The tour the viewer derives with no tours file: ``index``, then each scoped view in model
     tree order, then each dynamic view."""
     vs = views(model)
+
+    def note(vid: str) -> str:
+        # the viewer's autoTour note (`title — description`): the dwell is timed from it
+        v = vs[vid]
+        d = v.get("description")
+        if isinstance(d, dict):
+            d = d.get("md") or d.get("txt")
+        return " — ".join(x for x in (str(v.get("title") or vid), str(d or "").strip()) if x)
+
     slides = []
     if "index" in vs:
-        slides.append({"view": "index"})
+        slides.append({"view": "index", "note": note("index")})
     order = {f: i for i, f in enumerate(tree_order(model))}
     scoped = sorted(
         (vid for vid, v in vs.items() if view_kind(v) == "scoped"),
         key=lambda vid: order.get(vs[vid].get("viewOf"), len(order)),
     )
-    slides += [{"view": vid} for vid in scoped]
-    slides += [{"view": vid} for vid, v in vs.items() if view_kind(v) == "dynamic"]
+    slides += [{"view": vid, "note": note(vid)} for vid in scoped]
+    slides += [{"view": vid, "note": note(vid)} for vid, v in vs.items() if view_kind(v) == "dynamic"]
     return {"id": "auto", "title": "Overview", "slides": slides}
 
 

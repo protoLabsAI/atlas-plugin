@@ -8,6 +8,7 @@ export const SPEED_FACTOR: Record<Speed, number> = { fast: 0.6, normal: 1, slow:
 export const ZOOM_MS = 1150 // zoom into / out of a node (normal speed)
 export const FADE_MS = 700 // crossfade between unrelated views
 export const JUMP_MS = 1100 // a cousin / multi-level jump: one crossfade-zoom, no stops
+export const DIVE_MS = 1600 // several levels straight down / up: every zoom on ONE eased timeline
 export const CAMERA_SCALE = 1.8 // LikeC4's own camera moves (focus, fit, walkthrough steps): 450 ms → ~810 ms
 
 const URL_SLOW = Number(new URLSearchParams(location.search).get('slow') ?? 1) || 1 // screenshot aid
