@@ -69,10 +69,12 @@ export function frameSlide(view, canvas, insets = {}, { subject = null, named = 
         if (has(id)) frameAlso.push(id) // a named container is shown whole, border and title
       }
     }
-    if (pick.size) {
+    // a caption that names one element, or under half the view, is not a reason to drop the rest:
+    // the whole view, at the floor
+    if (pick.size >= 2 && pick.size >= leaves.length / 2) {
       ids = [...pick]
       cropped = true
-    }
+    } else frameAlso.length = 0
   }
   const subjectFrame = ids.length > 0
   const core = new Set(ids) // a focus / step / named subject is never let go

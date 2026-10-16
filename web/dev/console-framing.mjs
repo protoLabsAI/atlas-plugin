@@ -134,7 +134,10 @@ const sample = () => frame.evaluate((authored) => {
     const want = [...focus].sort()
     if (lit.join() !== want.join()) litWrong = `lit ${lit.join(', ') || '—'} ≠ focus ${want.join(', ')}`
   }
-  const subject = P.aim ?? P.subject ?? leaves // a focus / step, a caption-named narrowing, else the whole view
+  // the subject is what the TOUR FILE authors: a focus / step (→ the camera's aim), a walked step,
+  // else EVERY leaf of the view — a narrowing the viewer chose on its own never passes
+  const slideDoc = authored[P.slide] ?? {}
+  const subject = P.walk || slideDoc.focus || slideDoc.step ? (P.aim ?? leaves) : leaves
   const missing = subject.filter((id) => !visibleIds.has(id))
   const cx = (Math.min(...shown.map((b) => b.x)) + Math.max(...shown.map((b) => b.x2))) / 2
   const cy = (Math.min(...shown.map((b) => b.y)) + Math.max(...shown.map((b) => b.y2))) / 2

@@ -59,9 +59,11 @@ test('below the title floor: the caption-named nodes (whole, centred); unnamed â
   const nodes = [...Array(14)].map((_, i) => n(`s${i}`, i * 560, (i % 3) * 260))
   const edges = nodes.slice(1).map((m, i) => ({ id: `e${i}`, source: nodes[i].id, target: m.id }))
   const v = { bounds: { x: 0, y: 0, width: 13 * 560 + 320, height: 700 }, nodes, edges }
-  const f = frameSlide(v, canvas, insets, { named: ['s6', 's7'] })
+  const f = frameSlide(v, canvas, insets, { named: ['s3', 's4', 's5', 's6', 's7', 's8', 's9'] })
   assert.ok(f.cropped && f.partial.length === 0 && f.visible.includes('s6') && f.visible.includes('s7'), JSON.stringify(f))
   assertFramed(v, f, 'named')
+  // naming one element (or under half the view) never narrows to it: the whole view, at the floor
+  for (const named of [['s6'], ['s6', 's7']]) assert.equal(frameSlide(v, canvas, insets, { named }).visible.length, 14, named.join())
   const g = frameSlide(v, canvas, insets)
   assert.equal(g.visible.length, 14)
 })
