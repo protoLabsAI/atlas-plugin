@@ -30,8 +30,8 @@ MIN_SLIDE_MS = 2500
 SLIDE_BASE_MS = 1200
 PER_WORD_MS = 260
 MAX_SLIDE_MS = 15_000
-MIN_STEP_MS = 1800
-STEP_BASE_MS = 1000
+MIN_STEP_MS = 2500  # a walked step is read like a slide: its caption's reading time, ≥ 2.5 s
+STEP_BASE_MS = 1200
 END_HOLD_MS = 1500  # default extra time on the last caption (tour `end_hold_ms`, 0–30000)
 FINAL_CAPTION_MIN_MS = 5000  # by default the last caption is up at least this long in all
 CAPTION_FADE_MS = 400
@@ -60,8 +60,31 @@ def slide_dwell_ms(slide: dict) -> int:
     return min(MAX_SLIDE_MS, max(MIN_SLIDE_MS, SLIDE_BASE_MS + words(slide.get("note")) * PER_WORD_MS))
 
 
-def step_dwell_ms(label: str | None) -> int:
-    return min(MAX_SLIDE_MS, max(MIN_STEP_MS, STEP_BASE_MS + words(label) * PER_WORD_MS))
+def step_dwell_ms(caption: str | None) -> int:
+    return min(MAX_SLIDE_MS, max(MIN_STEP_MS, STEP_BASE_MS + words(caption) * PER_WORD_MS))
+
+
+def step_notes(edge: dict) -> str:
+    """A dynamic step's own ``notes`` (a string, or ``{txt}`` / ``{md}``), or ''."""
+    n = edge.get("notes")
+    if isinstance(n, dict):
+        n = n.get("md") or n.get("txt")
+    return str(n or "").strip()
+
+
+def step_caption(view: dict, edge: dict) -> str:
+    """The caption a walked step gets (the viewer's ``stepCaption``): its notes, else
+    ``From → To: label``."""
+    own = step_notes(edge)
+    if own:
+        return own
+    titles = {n.get("id"): n.get("title") for n in view.get("nodes") or []}
+
+    def title(i):
+        return titles.get(i) or str(i or "").split(".")[-1]
+
+    label = str(edge.get("label") or "").strip()
+    return f"{title(edge.get('source'))} → {title(edge.get('target'))}" + (f": {label}" if label else "")
 
 
 def _tour_int(tours: dict | None, tour: str, key: str, lo: int, hi: int) -> int | None:
@@ -103,6 +126,51 @@ def tour_slides(model: dict, tours: dict | None, tour: str) -> tuple[list[dict] 
     return None, "", f"unknown tour {tour!r}. Tours: {', '.join(known)}"
 
 
+def parent_view(model: dict, view_id: str) -> str | None:
+    """The viewer's ``parentView``: the view holding a node that drills into it, else (a scoped view)
+    the view whose scope is the nearest ancestor holding its element, else ``index``."""
+    vs = L.views(model)
+    target = vs.get(view_id)
+    if not target or view_id == "index":
+        return None
+    for vid, v in vs.items():
+        if vid != view_id and any(n.get("navigateTo") == view_id for n in v.get("nodes") or []):
+            return vid
+    of = target.get("viewOf")
+    if of:
+        best = None
+        for vid, v in vs.items():
+            if vid == view_id or v.get("_type") != "element":
+                continue
+            if not any(n.get("id") == of for n in v.get("nodes") or []):
+                continue
+            vo = v.get("viewOf")
+            depth = len(vo.split(".")) if vo and of.startswith(vo + ".") else 0
+            if best is None or depth > best[1]:
+                best = (vid, depth)
+        if best:
+            return best[0]
+    return "index" if "index" in vs else None
+
+
+def view_chain(model: dict, view_id: str) -> list[str]:
+    out = [view_id]
+    p = parent_view(model, view_id)
+    while p and p not in out:
+        out.insert(0, p)
+        p = parent_view(model, p)
+    return out
+
+
+def view_change_ms(model: dict, prev: str | None, view: str) -> int:
+    """A view change at normal speed: one move (a zoom through a portal, or one crossfade-zoom for a
+    cousin / a jump up), except a dive straight down several levels — one zoom per level."""
+    chain = view_chain(model, view)
+    if prev in chain:
+        return VIEW_CHANGE_MS * max(1, len(chain) - chain.index(prev) - 1)
+    return VIEW_CHANGE_MS
+
+
 def timeline(
     model: dict, slides: list[dict], speed: str = "normal", end_hold: int | None = None, beat: int = BEAT_MS
 ) -> list[int]:
@@ -113,14 +181,19 @@ def timeline(
     out, t, prev, last_dwell = [], 0, None, 0
     for i, s in enumerate(slides):
         v = vs.get(s.get("view")) or {}
-        t += round((VIEW_CHANGE_MS if s.get("view") != prev else (SAME_VIEW_MS if i else 0)) * k)
+        if s.get("view") != prev:
+            t += round(view_change_ms(model, prev, s.get("view")) * k)
+        elif i:
+            t += round(SAME_VIEW_MS * k)
         prev = s.get("view")
         last_dwell = slide_dwell_ms(s)
+        t += last_dwell
         if L.view_kind(v) == "dynamic" and not s.get("step"):
+            # each walked step: the camera's flight, then its caption's reading time
             for n in L.steps_of(v):
                 e = next((e for e in v.get("edges") or [] if str(e.get("id", "")).startswith(f"step-{n:02d}")), {})
-                last_dwell += step_dwell_ms(e.get("label"))
-        t += last_dwell
+                last_dwell = step_dwell_ms(step_caption(v, e))
+                t += round(SAME_VIEW_MS * k) + last_dwell
         out.append(t)
     if out:
         # end_hold None = the default, topped up to FINAL_CAPTION_MIN_MS of last caption

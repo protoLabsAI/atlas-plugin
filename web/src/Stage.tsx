@@ -273,7 +273,7 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
   const currentView = () => st.current.layers.find((l) => l.key === st.current.active)?.viewId ?? initialView
 
   const transition = useCallback(
-    async (target: string, jump = false) => {
+    async (target: string, jump = false, chained = false) => {
       const fromKey = st.current.active
       const srcView = currentView()
       if (srcView === target || !views.has(target)) return
@@ -314,7 +314,7 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
       moveUntil.current = performance.now() + 10000 // released when the hand-off ends
 
       // the target view is committed now: the breadcrumb follows it from the move's start
-      onCommitRef.current?.(target)
+      if (!chained) onCommitRef.current?.(target)
       if (kind === 'fade') {
         const vpB = vpFor(target, toKey)
         const vpA = A.xyflow.getViewport()
@@ -386,9 +386,18 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
       let common = 0
       while (common < from.length && common < to.length && from[common] === to[common]) common++
       const path = common > 0 ? [...from.slice(common - 1, -1).reverse(), ...to.slice(common)] : [target]
-      // parent ↔ child: the zoom through the portal. Anything further (a cousin, a grandchild) is ONE
-      // continuous move — a crossfade-zoom straight to the target; no intermediate view ever "arrives"
-      await transition(target, path.filter((v) => v !== currentView()).length > 1)
+      const hops = path.filter((v) => v !== currentView())
+      // straight down (a grandchild): zoom through each portal in turn, one continuous dive — the
+      // breadcrumb shows the destination from the start and no level is held
+      if (hops.length > 1 && common === from.length) {
+        onCommitRef.current?.(target)
+        for (const v of hops) await transition(v, false, true)
+        return
+      }
+      // parent ↔ child: the zoom through the portal. Anything else further (a cousin, a jump up
+      // several levels) is ONE continuous move — a crossfade-zoom straight to the target; no
+      // intermediate view ever "arrives"
+      await transition(target, hops.length > 1)
     },
     [chain, transition],
   )

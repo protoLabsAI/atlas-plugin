@@ -39,8 +39,8 @@ def test_dwell_numbers_match_the_viewer():
     assert R.slide_dwell_ms({"note": "one two three four five six seven eight nine ten"}) == 3800
     assert R.slide_dwell_ms({"note": "x", "hold_ms": 7000}) == 7000
     assert R.slide_dwell_ms({"note": "w " * 200}) == 15000
-    assert R.step_dwell_ms("POST chat") == 1800
-    assert R.step_dwell_ms("one two three four five six") == 2560
+    assert R.step_dwell_ms("POST chat") == 2500  # a walked step reads like a slide: ≥ 2.5 s
+    assert R.step_dwell_ms("one two three four five six") == 2760
     assert (R.END_HOLD_MS, R.FINAL_CAPTION_MIN_MS, R.CAPTION_FADE_MS, R.BEAT_MS) == (1500, 5000, 400, 1000)
     assert R.outro_ms() == 2900 and R.outro_ms(0) == 1400 and R.outro_ms(0, 0) == 400
 
@@ -48,9 +48,10 @@ def test_dwell_numbers_match_the_viewer():
 def test_timeline():
     slides = TOURS["tours"][0]["slides"]
     # slide 1: view change 1200 + 3800; slide 2: same view 900 + 4000; slide 3: view change 1200 +
-    # 2500 + 3 steps × 1800 (labels "send"/"run"/"complete"), then end hold 1500 (the last caption is
-    # up 7.9 s already — over FINAL_CAPTION_MIN_MS) + caption fade 400 + beat 1000
-    assert R.timeline(MODEL, slides) == [5000, 9900, 9900 + 1200 + 2500 + 3 * 1800 + 2900]
+    # 2500, then 3 walked steps × (900 camera + 2500 for the "From → To: label" caption — the steps
+    # have no notes), then end hold 2500 (the last caption, a step's, is up 2.5 s: topped up to 5 s)
+    # + caption fade 400 + beat 1000
+    assert R.timeline(MODEL, slides) == [5000, 9900, 9900 + 1200 + 2500 + 3 * (900 + 2500) + 3900]
     # a short last caption is topped up to 5 s in all: 2500 dwell + 2500 hold
     assert R.timeline(MODEL, [{"view": "index"}])[-1] == 1200 + 2500 + 2500 + 400 + 1000
     # an explicit end_hold_ms / end_beat_ms is taken as is
@@ -64,10 +65,10 @@ def test_end_hold(tmp_path):
     assert R.end_hold_ms(TOURS, "walk", last_dwell=2500) == 2500  # topped up to a 5 s last caption
     assert R.end_hold_ms({"tours": [{"id": "walk", "end_hold_ms": 99999}]}, "walk") == 1500
     _, ms, _ = R.shot_script(MODEL, tours, "walk")
-    assert ms == 21900 + 4500
+    assert ms == 27700 + 3500
     beat = {"tours": [{**TOURS["tours"][0], "end_beat_ms": 3000}]}
     assert R.end_beat_ms(beat, "walk") == 3000 and R.end_beat_ms(TOURS, "walk") == 1000
-    assert R.shot_script(MODEL, beat, "walk")[1] == 21900 + 2000
+    assert R.shot_script(MODEL, beat, "walk")[1] == 27700 + 2000
     bad = [
         f
         for f in L.lint(MODEL, {"tours": [{"id": "t", "end_hold_ms": -1, "slides": [{"view": "index"}]}]}, tmp_path)
@@ -89,7 +90,7 @@ def test_hold_ms_lint():
 
 
 GOLDEN = """name: "atlas-walk"
-description: "Atlas walkthrough \\u2014 A walk (3 slides, ~22 s), recorded continuously in record mode."
+description: "Atlas walkthrough \\u2014 A walk (3 slides, ~28 s), recorded continuously in record mode."
 base_url: "http://localhost:7870"
 viewport: {width: 1280, height: 800}
 color_scheme: dark
@@ -111,7 +112,7 @@ steps:
   - click: {role: menuitem, name: "Record \\u2014 A walk", exact: true, frame: "/plugins/atlas/view"}
   - wait_for: {selector: '[data-atlas-state=presenting]', frame: "/plugins/atlas/view", timeout_ms: 10000}
   - mark: start
-  - wait_for: {selector: '[data-atlas-state=tour-done]', frame: "/plugins/atlas/view", timeout_ms: 41900}
+  - wait_for: {selector: '[data-atlas-state=tour-done]', frame: "/plugins/atlas/view", timeout_ms: 47700}
   - mark: end
   - hold: 500
 """
@@ -119,7 +120,7 @@ steps:
 
 def test_shot_script_golden():
     text, ms, why = R.shot_script(MODEL, TOURS, "walk", base_url="http://localhost:7870/")
-    assert why == "" and ms == 21900
+    assert why == "" and ms == 27700
     assert text == GOLDEN
 
 
@@ -211,3 +212,38 @@ def test_valid_against_campaigns_own_validator():
     long = [{"view": "index", "hold_ms": 60000}] * 8
     text, _, _ = R.shot_script(MODEL, {"tours": [{"id": "long", "slides": long}]}, "long")
     mod.validate(text)
+
+
+def test_walked_steps_are_captioned_and_timed():
+    view = {"nodes": [{"id": "a", "title": "Console"}, {"id": "x.b", "title": "Server"}]}
+    assert (
+        R.step_caption(view, {"source": "a", "target": "x.b", "label": "POST", "notes": {"txt": "Posts."}}) == "Posts."
+    )
+    assert R.step_caption(view, {"source": "x.b", "target": "a", "label": "SSE"}) == "Server → Console: SSE"
+    assert R.step_caption(view, {"source": "a", "target": "zz.c"}) == "Console → c"
+
+
+def test_a_dive_straight_down_is_one_zoom_per_level():
+    model = {
+        "views": {
+            "index": {"id": "index", "_type": "element", "nodes": [{"id": "s", "navigateTo": "s_d"}]},
+            "s_d": {"id": "s_d", "_type": "element", "viewOf": "s", "nodes": [{"id": "s.c", "navigateTo": "c_d"}]},
+            "c_d": {"id": "c_d", "_type": "element", "viewOf": "s.c", "nodes": [{"id": "s.c.k"}]},
+        }
+    }
+    assert R.view_chain(model, "c_d") == ["index", "s_d", "c_d"]
+    assert R.view_change_ms(model, "index", "c_d") == 2 * R.VIEW_CHANGE_MS  # two zooms in
+    assert R.view_change_ms(model, "c_d", "index") == R.VIEW_CHANGE_MS  # one move out
+    assert R.view_change_ms(model, "s_d", "c_d") == R.VIEW_CHANGE_MS
+
+
+def test_lint_flags_hand_picked_steps_that_skip(tmp_path):
+    slides = [{"view": "turn", "step": 1}, {"view": "turn", "step": 3}]
+    found = [
+        f for f in L.lint(MODEL, {"tours": [{"id": "t", "slides": slides}]}, tmp_path) if f["rule"] == "tour-step-skip"
+    ]
+    assert found and "skips 1 step(s)" in found[0]["message"]
+    ok = [{"view": "turn", "step": 1}, {"view": "turn", "step": 2}]
+    assert not [
+        f for f in L.lint(MODEL, {"tours": [{"id": "t", "slides": ok}]}, tmp_path) if f["rule"] == "tour-step-skip"
+    ]

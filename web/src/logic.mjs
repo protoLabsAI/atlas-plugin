@@ -81,6 +81,22 @@ export function dynamicSteps(view) {
 
 const edgeLabel = (e) => (e?.label ?? e?.labelBBox?.text ?? '').toString().trim()
 
+/** A step's own notes (LikeC4 `notes` on a dynamic step: a string, or {txt} / {md}), or '' */
+export function stepNotes(e) {
+  const n = e?.notes
+  return (typeof n === 'string' ? n : (n?.md ?? n?.txt ?? '')).toString().trim()
+}
+
+/** The caption a walked step gets: its notes, else `From → To: label` (titles from the view). */
+export function stepCaption(view, e) {
+  const own = stepNotes(e)
+  if (own) return own
+  const title = (id) => (view?.nodes ?? []).find((n) => n.id === id)?.title ?? String(id ?? '').split('.').pop()
+  const label = edgeLabel(e)
+  // a backward step (`a <- b`) is drawn b → a: LikeC4 exports it with source / target as walked
+  return `${title(e?.source)} → ${title(e?.target)}${label ? `: ${label}` : ''}`
+}
+
 // ---------------------------------------------------------------- tours
 
 /**
@@ -705,8 +721,9 @@ export const MIN_SLIDE_MS = 2500
 export const SLIDE_BASE_MS = 1200
 export const PER_WORD_MS = 260
 export const MAX_SLIDE_MS = 15000
-export const MIN_STEP_MS = 1800
-export const STEP_BASE_MS = 1000
+// a walked step is read like a slide: its caption's reading time, at least 2.5 s
+export const MIN_STEP_MS = 2500
+export const STEP_BASE_MS = 1200
 // the end of a take: the last caption stays `end_hold_ms` longer (tour field, default 1.5 s — and by
 // default never less than FINAL_CAPTION_MIN_MS on screen in all), then fades (400 ms), then the
 // clean diagram holds `end_beat_ms` (tour field, default 1 s) — then tour-done
@@ -733,8 +750,8 @@ export function slideDwellMs(slide) {
 }
 
 /** How long one walkthrough step of a whole-dynamic-view slide stays up. */
-export function stepDwellMs(label) {
-  return Math.min(MAX_SLIDE_MS, Math.max(MIN_STEP_MS, STEP_BASE_MS + words(label) * PER_WORD_MS))
+export function stepDwellMs(caption) {
+  return Math.min(MAX_SLIDE_MS, Math.max(MIN_STEP_MS, STEP_BASE_MS + words(caption) * PER_WORD_MS))
 }
 
 /**

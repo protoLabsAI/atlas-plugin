@@ -367,7 +367,11 @@ the YAML to the recorder (Campaign Studio's `shotscript`) unchanged. Before you 
 - Write notes for **reading**. Each slide stays up for its note's reading time (about 260 ms a word,
   2.5–15 s) after the camera settles. Set `"hold_ms": 6000` on a slide that needs longer.
 - A slide that shows a whole dynamic view (no `step`) walks every step by itself, which is good
-  footage for a flow.
+  footage for a flow. Give every step a one-sentence `notes` — it becomes that step's caption
+  (without one the caption is `From → To: label`):
+  `console -> server 'POST /a2a' { notes 'The console posts it to the server.' }`
+  Prefer this to hand-picking a few `step` slides: skipping steps reads as skipping half the flow
+  (lint `tour-step-skip`).
 - Keep notes short (one or two sentences). In record mode they become large on-screen captions.
 - The last caption gets 1.5 s of extra reading time, and at least 5 s on screen in all. Then it
   fades, and the diagram holds a clean 1 s beat before the take ends. Set `"end_hold_ms"`

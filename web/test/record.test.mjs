@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { slideDwellMs, stepDwellMs, words, parseDeepLink, END_HOLD_MS, FINAL_CAPTION_MIN_MS, CAPTION_FADE_MS, BEAT_MS, outroMs, endHoldFor, endBeatFor, toursFor, cleanTitle } from '../src/logic.mjs'
+import { slideDwellMs, stepDwellMs, stepCaption, words, parseDeepLink, END_HOLD_MS, FINAL_CAPTION_MIN_MS, CAPTION_FADE_MS, BEAT_MS, outroMs, endHoldFor, endBeatFor, toursFor, cleanTitle } from '../src/logic.mjs'
 
 test('dwell model (pinned to record.py — see tests/test_record.py)', () => {
   assert.equal(words('The **graph** owns `the` loop.'), 5)
@@ -8,8 +8,8 @@ test('dwell model (pinned to record.py — see tests/test_record.py)', () => {
   assert.equal(slideDwellMs({ note: 'one two three four five six seven eight nine ten' }), 3800)
   assert.equal(slideDwellMs({ note: 'x', hold_ms: 7000 }), 7000)
   assert.equal(slideDwellMs({ note: 'w '.repeat(200) }), 15000, 'capped')
-  assert.equal(stepDwellMs('POST chat'), 1800)
-  assert.equal(stepDwellMs('one two three four five six'), 2560)
+  assert.equal(stepDwellMs('POST chat'), 2500) // a walked step reads like a slide: ≥ 2.5 s
+  assert.equal(stepDwellMs('one two three four five six'), 2760)
   assert.deepEqual([END_HOLD_MS, FINAL_CAPTION_MIN_MS, CAPTION_FADE_MS, BEAT_MS, outroMs(), outroMs(0), outroMs(0, 0)], [1500, 5000, 400, 1000, 2900, 1400, 400])
   // the default end hold tops the last caption up to 5 s on screen; an explicit one is taken as is
   assert.equal(endHoldFor({}, 2500), 2500)
@@ -47,4 +47,12 @@ test('end_hold_ms survives toursFor (0–30000)', () => {
   assert.equal(toursFor({ tours: [{ id: 't', end_hold_ms: 99999, slides: [{ view: 'index' }] }] }, data)[0].end_hold_ms, undefined)
   assert.equal(toursFor({ tours: [{ id: 't', end_beat_ms: 3000, slides: [{ view: 'index' }] }] }, data)[0].end_beat_ms, 3000)
   assert.equal(toursFor({ tours: [{ id: 't', end_beat_ms: 5001, slides: [{ view: 'index' }] }] }, data)[0].end_beat_ms, undefined)
+})
+
+test('a walked step is captioned from its notes, else From → To: label', () => {
+  const view = { nodes: [{ id: 'a', title: 'Console' }, { id: 'x.b', title: 'Server' }] }
+  assert.equal(stepCaption(view, { id: 'step-01', source: 'a', target: 'x.b', label: 'POST', notes: { txt: 'The console posts it.' } }), 'The console posts it.')
+  assert.equal(stepCaption(view, { id: 'step-02', source: 'a', target: 'x.b', label: 'POST', notes: 'Plain.' }), 'Plain.')
+  assert.equal(stepCaption(view, { id: 'step-03', source: 'x.b', target: 'a', label: 'SSE' }), 'Server → Console: SSE')
+  assert.equal(stepCaption(view, { id: 'step-04', source: 'a', target: 'zz.c' }), 'Console → c')
 })

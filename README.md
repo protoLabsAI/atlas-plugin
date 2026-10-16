@@ -49,8 +49,9 @@ Atlas is recordable without any coupling to a recorder:
 - **Autoplay / Record.** The `▾` next to *Present* (aria-label *Tour options*) lists every tour with
   *Present*, *Autoplay* and *Record*. Autoplay holds each slide for its `hold_ms` (optional, 500–60000,
   linted) or, by default, for the note's reading time (1.2 s + 260 ms a word, 2.5–15 s), after the
-  camera settles. A slide that shows a whole dynamic view then walks its steps (1–15 s each, from the
-  step label). The schedule is deterministic and waits for fonts to load. *Record* is autoplay plus
+  camera settles. A slide that shows a whole dynamic view then walks every step. Each step is captioned
+  from its own `notes` (else `From → To: label`) and held for that caption's reading time (2.5–15 s).
+  A tour that hand-picks steps of one flow and skips some gets a `tour-step-skip` lint warning. The schedule is deterministic and waits for fonts to load. *Record* is autoplay plus
   large caption-style notes, with no toolbar, keyboard hints, toasts, cursor or hover states.
 - **The end of a take.** The last caption stays up for its reading time plus the tour's
   `end_hold_ms` (optional, 0–30000, linted). By default that is 1.5 s, raised if needed so the

@@ -4,7 +4,7 @@
 // diagram surface only: on a button / link / field, Tab + Enter + Space stay native (logic.mjs keyOwner).
 import type { LikeC4Model } from '@likec4/core/model'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { CAPTION_AWAY_MS, CAPTION_FADE_MS, endBeatFor, endHoldFor, keyOwner, presenterOwns, cycle, dynamicSteps, mdLight, presenterKey, slideDwellMs, stepDwellMs } from './logic.mjs'
+import { CAPTION_AWAY_MS, CAPTION_FADE_MS, endBeatFor, endHoldFor, keyOwner, presenterOwns, cycle, dynamicSteps, mdLight, presenterKey, slideDwellMs, stepCaption, stepDwellMs } from './logic.mjs'
 import { applyHighlight, clearHighlight } from './highlight'
 import { Button, Kbd } from '@protolabsai/ui/primitives'
 import { Select } from '@protolabsai/ui/forms'
@@ -94,7 +94,14 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
       }
       chrome.current.top = Math.ceil(top + 8)
       const clones = measureRef.current ? [...measureRef.current.querySelectorAll('.notes')] : []
-      chrome.current.bottoms = clones.map((c) => Math.ceil(r.bottom - (c as HTMLElement).getBoundingClientRect().top + 12))
+      // a slide's reserve: its caption, and every step caption it walks (the tallest — the camera
+      // keeps one frame for the whole walk)
+      const bottoms: number[] = []
+      for (const c of clones) {
+        const i = Number((c as HTMLElement).dataset.slide)
+        bottoms[i] = Math.max(bottoms[i] ?? 0, Math.ceil(r.bottom - (c as HTMLElement).getBoundingClientRect().top + 12))
+      }
+      chrome.current.bottoms = bottoms
       const live = notesRef.current?.getBoundingClientRect()
       chrome.current.live = live?.height ? Math.ceil(r.bottom - live.top + 12) : 0
       stage.current?.reclip()
@@ -141,6 +148,17 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
   )
   const [cropped, setCropped] = useState(false)
   const [noteSlide, setNoteSlide] = useState(first)
+  const [noteStep, setNoteStep] = useState(0) // the walked step whose caption is up (0 = the slide's)
+  /** the captions a whole-dynamic-view slide walks through, one per step */
+  const walkedCaptions = (t: Slide | null | undefined): string[] => {
+    const v = t && !t.step ? data?.views?.[t.view] : null
+    return v?._type === 'dynamic' ? dynamicSteps(v).map((e: any) => stepCaption(v, e)) : []
+  }
+  /** resolves once the camera (a focus ease, a walkthrough step) has landed */
+  const settleCamera = async () => {
+    await sleep(80)
+    for (let i = 0; i < 100 && stage.current?.moving(); i++) await sleep(40)
+  }
   // the caption on screen changed: the diagram's clip follows at once (not at the next rest)
   useEffect(() => {
     const id = requestAnimationFrame(() => stage.current?.reclip())
@@ -159,6 +177,7 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
   const setWalkNow = (n: number) => {
     st.current = { ...st.current, walk: n }
     setWalk(n)
+    if (n === 0) setNoteStep(0)
   }
   const goView = async (v: string) => {
     await S().go(v)
@@ -233,8 +252,7 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
       await applySlideDetail(s, same)
       // the slide has ARRIVED when its camera (a focus ease, a walkthrough step) has landed — the
       // caption fades in then, and a recording's dwell starts then
-      await sleep(80)
-      for (let i = 0; i < 100 && stage.current?.moving(); i++) await sleep(40)
+      await settleCamera()
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [applySlideDetail],
@@ -256,7 +274,10 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
         try {
           await showSlide(tour[i])
         } finally {
-          if (st.current.slide === i) setNoteSlide(i) // the caption changes when the camera arrives
+          if (st.current.slide === i) {
+            setNoteSlide(i) // the caption changes when the camera arrives
+            setNoteStep(0)
+          }
           setCaptionAway(false)
         }
       })
@@ -308,6 +329,7 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
         if (tour[i]?.view === v && !tour[i].step) {
           st.current = { ...st.current, slide: i }
           setNoteSlide(i)
+          setNoteStep(0)
           return setSlide(i)
         }
   }
@@ -358,16 +380,25 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [run, onExit],
   )
-  const walkTo = (n: number) => {
+  // walking a whole dynamic view: each step is captioned from its notes (else `From → To: label`);
+  // the outgoing caption fades as the camera starts, the step's fades in when it lands
+  const walkToken = useRef(0)
+  const walkTo = async (n: number) => {
     const d = stage.current?.diagram()
     if (!d) return
+    const token = ++walkToken.current
     aim(n ? stepEnds(currentView(), n) : null)
+    setCaptionAway(true)
     if (n === 0) {
       d.stopWalkthrough()
       stage.current?.frame(450)
     } else if ((d.getContext() as any).activeWalkthrough) d.walkthroughStep({ step: stepId(n) })
     else d.startWalkthrough(stepId(n))
     setWalkNow(n)
+    await settleCamera()
+    if (token !== walkToken.current) return // a newer step took over
+    setNoteStep(n)
+    setCaptionAway(false)
   }
   const cycleFocus = (dir: 1 | -1) => {
     const nodes = (data?.views?.[currentView()]?.nodes ?? []).filter((n: any) => !n.children?.length).map((n: any) => n.id)
@@ -380,7 +411,10 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
   useEffect(() => onSpeed((s) => !record && void toast({ message: `Transitions: ${s}`, tone: 'info', duration: 1600 })) as any, [record, toast])
 
   const shown = adhoc ?? tour[slide]
-  const captioned = adhoc ?? tour[noteSlide] ?? shown // notes follow the camera, not the keypress
+  const slideCaptioned = adhoc ?? tour[noteSlide] ?? shown // notes follow the camera, not the keypress
+  // a walked step's caption replaces the slide's (whole-dynamic-view slides only)
+  const walkedNote = !adhoc && noteStep && !slideCaptioned.step ? walkedCaptions(slideCaptioned)[noteStep - 1] : null
+  const captioned = walkedNote ? { ...slideCaptioned, note: walkedNote } : slideCaptioned
   const shownView = data?.views?.[shown.view]
   const wholeDynamic = !shown.step && shownView?._type === 'dynamic' ? dynamicSteps(shownView).length : 0
 
@@ -415,9 +449,10 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
         if (v?._type === 'dynamic' && !tour[i].step) {
           for (const [n, e] of dynamicSteps(v).entries()) {
             if (!live || manual.current) return
-            walkTo(n + 1)
-            lastDwell += stepDwellMs(e.label)
-            await dwell(stepDwellMs(e.label))
+            await walkTo(n + 1) // resolves when the step has landed and its caption is up
+            const ms = stepDwellMs(stepCaption(v, e))
+            lastDwell = ms // the last caption on screen is the last step's
+            await dwell(ms)
           }
         }
       }
@@ -584,13 +619,15 @@ export function Presenter({ model, data, tours, tourId, start, cmd, scheme, them
       {showNotes && (
         <>
         <div ref={measureRef} className="notes-measure" aria-hidden>
-          {tour.map((t, i) => (
-            <aside key={i} className="notes">
-              {!record && <div className="notes-head">.</div>}
-              {t.note ? <div className="notes-body" dangerouslySetInnerHTML={{ __html: mdLight(t.note, { codeRefs: true }) }} /> : <div className="notes-body">.</div>}
-              {!record && <div className="keys">.</div>}
-            </aside>
-          ))}
+          {tour.flatMap((t, i) =>
+            [t.note ?? '', ...walkedCaptions(t)].map((note, j) => (
+              <aside key={`${i}.${j}`} className="notes" data-slide={i}>
+                {!record && <div className="notes-head">.</div>}
+                {note ? <div className="notes-body" dangerouslySetInnerHTML={{ __html: mdLight(note, { codeRefs: true }) }} /> : <div className="notes-body">.</div>}
+                {!record && <div className="keys">.</div>}
+              </aside>
+            )),
+          )}
         </div>
         <aside ref={notesRef as any} data-presenter-chrome className={`notes${captionOut || captionAway ? ' notes--out' : ''}`} aria-live="polite" style={{ ['--caption-fade' as any]: `${captionAway && !captionOut ? CAPTION_AWAY_MS : CAPTION_FADE_MS}ms` }}>
           {!record && (

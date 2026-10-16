@@ -153,10 +153,10 @@ async def test_tools_against_the_real_example(project, registry):
     # the example links into files the tmp project doesn't have → lint says so
     assert "[code-link-missing]" in report
     tree = await tools["atlas_describe"].ainvoke({})
-    assert "proto_agent_detail" in tree and "overview — protoAgent in 5 minutes (8 slides)" in tree
+    assert "proto_agent_detail" in tree and "overview — protoAgent in 85 seconds (8 slides)" in tree
     flow = await tools["atlas_describe"].ainvoke({"view": "chat_turn_flow"})
     assert (
-        "9. Chat turn driver → Console: SSE stream [proto_agent.interfaces.server.chat → proto_agent.interfaces.console]"
+        "10. Turn streaming → Console: SSE [proto_agent.interfaces.server.turn_stream → proto_agent.interfaces.console]"
         in flow
     )
     shown = await tools["atlas_show"].ainvoke({"tour": "overview", "slide": 8, "present": True})

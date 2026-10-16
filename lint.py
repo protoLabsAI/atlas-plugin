@@ -256,9 +256,11 @@ def check_slide(model: dict, slide: dict) -> list[str]:
     ):
         problems.append(f"hold_ms {hold!r} must be an integer between {HOLD_MIN_MS} and {HOLD_MAX_MS} (milliseconds)")
     for key in ("focus", "via"):
-        fqn = slide.get(key)
-        if fqn is not None and fqn not in elements(model):
-            problems.append(f"{key} {fqn!r} is not an element")
+        val = slide.get(key)
+        # `focus` may name several elements (a list); `via` is one
+        for fqn in val if key == "focus" and isinstance(val, list) else [val]:
+            if fqn is not None and (not isinstance(fqn, str) or fqn not in elements(model)):
+                problems.append(f"{key} {fqn!r} is not an element")
     step = slide.get("step")
     if step is not None:
         if view_kind(view) != "dynamic":
@@ -310,6 +312,28 @@ def _lint_tours(model: dict, tours: dict | None) -> list[dict]:
                 continue
             for problem in check_slide(model, slide):
                 out.append({"rule": "tour-slide", "tour": tid, "message": f"tour {tid} slide {n}: {problem}"})
+        # hand-picked steps of one dynamic view that skip steps read as "skipping half the flow":
+        # a slide on the view with no `step` walks every step, captioned from the steps' notes
+        prev = None
+        for n, slide in enumerate(slides, 1):
+            cur = (slide.get("view"), slide.get("step")) if isinstance(slide, dict) else (None, None)
+            if (
+                prev
+                and cur[0] == prev[0]
+                and isinstance(cur[1], int)
+                and isinstance(prev[1], int)
+                and cur[1] - prev[1] > 1
+            ):
+                out.append(
+                    {
+                        "rule": "tour-step-skip",
+                        "tour": tid,
+                        "message": f"tour {tid} slide {n}: step {prev[1]} → {cur[1]} on {cur[0]} skips "
+                        f"{cur[1] - prev[1] - 1} step(s) — one slide with no `step` walks them all "
+                        "(each captioned from its step `notes`)",
+                    }
+                )
+            prev = cur
     return out
 
 

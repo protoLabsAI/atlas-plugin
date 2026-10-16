@@ -41,14 +41,35 @@ views {
 
   dynamic view chat_turn_flow {
     title 'Chat turn'
-    operator -> proto_agent.interfaces.console 'sends message'
-    proto_agent.interfaces.console -> proto_agent.interfaces.server.chat 'POST chat'
-    proto_agent.interfaces.server.chat -> proto_agent.core.graph.agent_core 'astream'
-    proto_agent.core.graph.agent_core -> proto_agent.core.graph.llm_client 'model call'
-    proto_agent.core.graph.llm_client -> gateway 'completion'
-    proto_agent.core.graph.agent_core -> proto_agent.core.tools 'tool call'
-    proto_agent.core.graph.agent_core -> proto_agent.core.graph.checkpointer 'persist'
-    proto_agent.interfaces.server.chat <- proto_agent.core.graph.agent_core 'final answer'
-    proto_agent.interfaces.console <- proto_agent.interfaces.server.chat 'SSE stream'
+    operator -> proto_agent.interfaces.console 'sends message' {
+      notes 'You send a message in the console.'
+    }
+    proto_agent.interfaces.console -> proto_agent.interfaces.server.chat 'POST /a2a' {
+      notes 'The console posts it to the server.'
+    }
+    proto_agent.interfaces.server.chat -> proto_agent.core.graph.agent_core 'astream_events' {
+      notes 'The server hands the turn to the agent graph.'
+    }
+    proto_agent.core.graph.agent_core -> proto_agent.core.graph.llm_client 'model call' {
+      notes 'The agent asks its LLM client for the next step…'
+    }
+    proto_agent.core.graph.llm_client -> gateway 'completion' {
+      notes '…which calls your model through the gateway.'
+    }
+    proto_agent.core.graph.agent_core -> proto_agent.core.tools 'tool call' {
+      notes 'If the model asks for a tool, the agent runs it…'
+    }
+    proto_agent.core.graph.agent_core <- proto_agent.core.tools 'result' {
+      notes '…and feeds the result back to the model.'
+    }
+    proto_agent.core.graph.agent_core -> proto_agent.core.graph.checkpointer 'persist' {
+      notes 'Every step is checkpointed.'
+    }
+    proto_agent.core.graph.agent_core -> proto_agent.interfaces.server.turn_stream 'events' {
+      notes 'The final answer returns to the server…'
+    }
+    proto_agent.interfaces.server.turn_stream -> proto_agent.interfaces.console 'SSE' {
+      notes '…streaming live to your console.'
+    }
   }
 }
