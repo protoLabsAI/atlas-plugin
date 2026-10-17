@@ -2,6 +2,20 @@
 
 All notable changes to Atlas. Versions follow `version` in `protoagent.plugin.yaml`.
 
+## [0.2.5]
+
+### Added
+
+- **`atlas_show(caption=…)`: a narration bar under the diagram.** One plain sentence (≤ 280 characters)
+  in a DS-styled caption bar below the canvas, so it never covers a node. It persists across shows
+  until a new caption replaces it; `""` or `atlas_clear` removes it. Sized for recording (20–30 px).
+
+### Fixed
+
+- **A note on a flow step is no longer refused** ([#14](https://github.com/protoLabsAI/atlas-plugin/issues/14)).
+  `atlas_show(view=…, step=N, note=…)` with nothing else highlighted now anchors the note to the
+  step's target node, the way the walkthrough's own captions read.
+
 ## [0.2.4]
 
 ### Fixed

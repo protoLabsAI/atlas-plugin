@@ -185,10 +185,19 @@ def show_target(
     note=None,
     drill=False,
     state=None,
+    caption=None,
 ) -> tuple[dict | None, str]:
     """Validate + resolve a show request → ``(event_payload, "")`` or ``(None, why)``.
 
-    ``state`` is the operator's latest ``atlas.viewing`` (for step="next" and view ties)."""
+    ``state`` is the operator's latest ``atlas.viewing`` (for step="next" and view ties).
+    ``caption``: narration for the caption bar under the diagram ("" clears it)."""
+    if caption is not None:
+        caption = str(caption).strip()
+        if len(caption) > N.NOTE_MAX:
+            return (
+                None,
+                f"Can't show that: caption is {len(caption)} characters — keep it to {N.NOTE_MAX} (one sentence)",
+            )
     payload, model = service.current()
     if not model:
         msg = (payload.get("errors") or [{"message": "no model"}])[0]["message"]
@@ -210,6 +219,8 @@ def show_target(
                 return None, f"slide {slide!r} is out of range for tour {tour} (1–{len(slides)})"
             event["slide"] = slide
         if not (view or element or focus or relations or step is not None):
+            if caption is not None:
+                event["caption"] = caption
             return event, ""
     planned, why = N.plan_view_show(
         model, state, view=view, element=element, focus=focus, relations=relations, note=note, step=step, drill=drill
@@ -217,6 +228,8 @@ def show_target(
     if planned is None:
         return None, "Can't show that: " + why
     event.update(planned)
+    if caption is not None:
+        event["caption"] = caption
     return event, ""
 
 
@@ -242,6 +255,10 @@ def describe_show(event: dict, model: dict) -> str:
             parts.append(f"{len(event['edges'])} edge(s)")
         if event.get("note"):
             parts.append("with a callout")
+    if event.get("caption"):
+        parts.append("with the caption up")
+    elif event.get("caption") == "":
+        parts.append("caption cleared")
     return "Showing " + ", ".join(parts) + " in Atlas" + (" (presenter mode)." if event.get("present") else ".")
 
 
@@ -284,6 +301,7 @@ def build_tools(service, registry, state: N.ViewerState | None = None, last: N.L
         tour: str | None = None,
         slide: int | None = None,
         present: bool = False,
+        caption: str | None = None,
     ) -> str:
         """Show and highlight part of the architecture diagram live in the console's Atlas view —
         use it to narrate the architecture while the operator watches.
@@ -295,6 +313,9 @@ def build_tools(service, registry, state: N.ViewerState | None = None, last: N.L
         view: a view id from atlas_describe. step: a 1-based walkthrough step of a dynamic view,
           or "next" / "prev" relative to the operator's current step.
         tour + slide (1-based): a presenter tour ("auto" always exists). present: open presenter mode.
+        caption: one plain sentence of narration (≤ 280 chars) shown in a caption bar UNDER the
+          diagram (it never covers it) — what is happening right now and why. It stays until the
+          next caption or atlas_clear; "" removes it. Use it to narrate a live walkthrough.
         A highlight stays until the next atlas_show / atlas_clear or the operator clicks."""
         event, why = await asyncio.to_thread(
             show_target,
@@ -310,6 +331,7 @@ def build_tools(service, registry, state: N.ViewerState | None = None, last: N.L
             note=note,
             drill=drill,
             state=state.get(),
+            caption=caption,
         )
         if event is None:
             return why

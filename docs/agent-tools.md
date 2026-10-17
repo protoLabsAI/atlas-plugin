@@ -104,7 +104,8 @@ or the console tab is gone.`
 atlas_show(view: str = "", element: str | list[str] | None = None,
            focus: str | list[str] | None = None, relations: list[list[str]] | None = None,
            note: str | None = None, step: int | str | None = None, drill: bool = False,
-           tour: str | None = None, slide: int | None = None, present: bool = False) -> str
+           tour: str | None = None, slide: int | None = None, present: bool = False,
+           caption: str | None = None) -> str
 ```
 
 Resolves the request against the model, emits [`atlas.show`](#atlasshow), and asks the console
@@ -116,11 +117,12 @@ to open the Atlas view. Returns a one-line confirmation, or why it can't.
 | `drill` | With one `element`: open that element's **own drill-down** instead. |
 | `focus` | Element(s) to highlight in the view; everything else dims and the camera fits them. |
 | `relations` | `[[from, to], …]` — highlight the edges between each pair: every direct edge, else the shortest directed path, else the shortest undirected one. Both ends are highlighted. |
-| `note` | A callout pinned to the first highlighted node. Markdown-light, at most **280** characters. It needs something highlighted — a `step` alone isn't enough, so add `focus`. |
+| `note` | A callout pinned to the first highlighted node. Markdown-light, at most **280** characters. It needs something highlighted; with a flow `step` and nothing else, it anchors to that step's target node. |
 | `view` | A view id (from `atlas_describe`). |
 | `step` | A flow step: a number (1-based), or `"next"`, `"prev"` / `"previous"`, `"first"`, `"last"` — relative to the operator's current step. With no `view`, uses the operator's current flow. |
 | `tour`, `slide` | A tour id (`"auto"` always exists) and a 1-based slide. With only these, opens the tour there. |
 | `present` | Open presenter mode. |
+| `caption` | One plain sentence of narration (≤ 280 characters) in a caption bar **under** the diagram, so it never covers a node. It stays up across shows until a new caption replaces it; `""` or `atlas_clear` removes it. Absent leaves the bar as it is. |
 
 **Element ids** resolve by exact FQN, else a **unique** case-insensitive title or last segment
 (`"scheduler"` → `proto_agent.platform.scheduler`). A string with commas is a list. An element
@@ -151,7 +153,7 @@ View errors start `Can't show that:`; tour errors are returned bare. Each says h
 | `next` past the end | `already at the last step (10 of 10).` plus the step list |
 | No common view | `no single view shows a + b (a: v1, v2; b: v3)` |
 | No path | `no relationship path between a and b in view v` |
-| Note too long / unanchored | `note is 300 characters — keep it to 280 (one or two sentences)` · `a note needs something to anchor to — give element/focus/relations` |
+| Note too long / unanchored | `note is 300 characters — keep it to 280 (one or two sentences)` · `a note needs something to anchor to — give element/focus/relations (or a step)` · `caption is 300 characters — keep it to 280 (one sentence)` |
 | Unknown tour / slide | `Unknown tour 'x'. Tours: overview, auto` · `slide 9 is out of range for tour overview (1–8)` |
 
 A highlight stays until the next `atlas_show` / `atlas_clear`, or until the operator clicks a node.
@@ -287,6 +289,7 @@ Emitted by `atlas_show`, already resolved and validated:
 | `focus` | string[] | **Node ids in `view`** to highlight (an element is mapped onto its nearest shown ancestor). |
 | `edges` | string[] | Edge ids in `view` to highlight. |
 | `note` | string | The callout, ≤ 280 characters. |
+| `caption` | string | Narration for the caption bar, ≤ 280 characters; `""` clears it. Absent: the bar is unchanged. |
 | `tour`, `slide` | string, int | A tour and its 1-based slide. |
 | `show_seq` | int | Sequence number of this show / clear (see below). |
 

@@ -167,6 +167,9 @@ export function App({ kit }: { kit: Kit }) {
   const [pcmd, setPcmd] = useState<PresenterCmd | null>(null)
   const [walk, setWalk] = useState<number | null>(null)
   const [highlight, setHighlight] = useState<Highlight | null>(null)
+  // the agent's narration, shown in a bar UNDER the diagram (never over it) until replaced or cleared
+  const [caption, setCaption] = useState<{ text: string; seq: number } | null>(null)
+  const captionSeq = useRef(0)
   const [presenting, setPresenting] = useState<{ view: string; slide: number; step: number | null } | null>(null)
   const [query, setQuery] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
@@ -317,6 +320,7 @@ export function App({ kit }: { kit: Kit }) {
       return
     }
     if (mode.kind === 'present') setMode({ kind: 'explore' })
+    if (req.caption !== undefined) setCaption(req.caption ? { text: req.caption, seq: ++captionSeq.current } : null)
     setViewId(req.view)
     setSelected(null)
     const plan = exploreShowPlan(req) as any
@@ -354,7 +358,7 @@ export function App({ kit }: { kit: Kit }) {
         if (!act) return
         appliedSeq.current = last.seq
         if (act === 'show') showRef.current(last.data ?? {})
-        else clearRef.current()
+        else (clearRef.current(), setCaption(null))
       } catch {
         /* an older backend: no replay */
       }
@@ -376,7 +380,7 @@ export function App({ kit }: { kit: Kit }) {
         if (typeof m.data?.show_seq === 'number') appliedSeq.current = m.data.show_seq
       }
       if (m.topic === SHOW_TOPIC) showRef.current(m.data ?? {})
-      else if (m.topic === CLEAR_TOPIC) clearRef.current()
+      else if (m.topic === CLEAR_TOPIC) (clearRef.current(), setCaption(null))
     }
     window.addEventListener('message', onMsg)
     subscribeBus()
@@ -737,6 +741,13 @@ export function App({ kit }: { kit: Kit }) {
           <Details data={data} fqn={selected} paneOn={paneOn} onClose={() => setSelected(null)} onOpenView={(vv, f) => openView(vv, f)} onCode={(l, note, how) => void openCode(l, note, how)} onCodeRefClick={onCodeRefClick} onAsk={canCompose ? () => ask(selected) : undefined} />
         )}
       </main>
+      {caption && (
+        <div className="caption-bar" role="status" aria-live="polite">
+          <p key={caption.seq} className="caption-text">
+            {caption.text}
+          </p>
+        </div>
+      )}
     </div>
   )
 
