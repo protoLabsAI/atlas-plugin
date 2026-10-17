@@ -189,7 +189,7 @@ def step_lines(model: dict, view: dict, *, ids: bool = False) -> list[str]:
     title = lambda f: str((els.get(f) or {}).get("title") or f)  # noqa: E731
     out = []
     for n in L.steps_of(view):
-        e = next((e for e in view.get("edges") or [] if str(e.get("id", "")).startswith(f"step-{n:02d}")), {})
+        e = L.step_edge(view, n)
         label = f": {e['label']}" if e.get("label") else ""
         ref = f" [{e.get('source')} → {e.get('target')}]" if ids else ""
         out.append(f"{n}. {title(e.get('source'))} → {title(e.get('target'))}{label}{ref}")
@@ -479,10 +479,7 @@ def plan_view_show(
         if not hl and "step" in event:
             # A walkthrough step already names its edge (from → to): anchor the note to the step's
             # target node, the way the walkthrough's own captions read (#14).
-            e = next(
-                (e for e in v.get("edges") or [] if str(e.get("id", "")).startswith(f"step-{event['step']:02d}")),
-                None,
-            )
+            e = L.step_edge(v, event["step"])
             target = str((e or {}).get("target") or "")
             if target and target in node_ids(v):
                 hl = [target]

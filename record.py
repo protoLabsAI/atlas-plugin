@@ -257,7 +257,7 @@ def timeline(
         if L.view_kind(v) == "dynamic" and not s.get("step"):
             # each walked step: the camera's flight, then its caption's reading time
             for n in L.steps_of(v):
-                e = next((e for e in v.get("edges") or [] if str(e.get("id", "")).startswith(f"step-{n:02d}")), {})
+                e = L.step_edge(v, n)
                 last_dwell = step_dwell_ms(step_caption(v, e))
                 t += round(SAME_VIEW_MS * k) + last_dwell
         out.append(t)

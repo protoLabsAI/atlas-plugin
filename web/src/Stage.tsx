@@ -125,8 +125,15 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
   const framed = (viewId: string, key?: number, subject?: string[] | null) =>
     frameSlide(views.get(viewId), canvasSize(), insets(), { subject: subject ?? null, named: subject ? null : (namedFn?.(viewId) ?? null), kFixed: key != null ? layerScale.current.get(key)?.k : undefined, keFixed: key != null ? layerScale.current.get(key)?.ke : undefined }) as any
   /** the viewport (whole canvas) a view is shown with */
-  const vpFor = (viewId: string, key?: number, subject?: string[] | null) =>
-    legible ? framed(viewId, key, subject).vp : fitBox(views.get(viewId).bounds, fullRect(), pad)
+  const vpFor = (viewId: string, key?: number, subject?: string[] | null) => {
+    if (legible) return framed(viewId, key, subject).vp
+    const v = views.get(viewId)
+    // explore, aimed (a walkthrough step): the step's participants, framed whole and legible in the
+    // safe rect with no node cut at the edge (framing.mjs, as present does), at explore's text scale
+    if (subject?.some((id) => v?.nodes?.some((n: any) => n.id === id)))
+      return frameSlide(v, canvasSize(), { top: 0, bottom: 0 }, { subject, kFixed: 1, keFixed: 1 }).vp
+    return fitBox(v.bounds, fullRect(), pad)
+  }
   /** the flow box the whole canvas shows under a viewport (for the synced zoom hand-off) */
   const canvasBox = (vp: { x: number; y: number; zoom: number }): Box => {
     const c = canvasSize()
@@ -702,8 +709,20 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
                         // the slide's subject — the whole view when it has none — in the safe rect
                         return vpFor(l.viewId, l.key, aimRef.current)
                       }
-                    : undefined,
-                  !!legible, // present / record: LikeC4's moves fly (one eased van Wijk path)
+                    : (vp: any) => {
+                        if (ownMove.current) {
+                          ownMove.current = false
+                          return vp
+                        }
+                        // explore: while a walkthrough step is aimed, LikeC4's moves — its step focus
+                        // (one edge only) and the whole-view refit it does on every canvas resize —
+                        // frame the step's participants instead
+                        if (!aimRef.current || !(diagram.getContext() as any)?.activeWalkthrough) return vp
+                        return vpFor(l.viewId, l.key, aimRef.current)
+                      },
+                  // present / record: LikeC4's moves fly (one eased van Wijk path); explore too while
+                  // a step is aimed, so a pan between distant steps stays followable
+                  () => !!legible || !!aimRef.current,
                   (vp: any) => {
                     moveUntil.current = performance.now()
                     cullRef.current(l.key, vp)

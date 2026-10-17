@@ -292,3 +292,25 @@ async def test_tools_current_next_and_clear(stub, registry):
     assert registry.emitted[-1][0] == "atlas.clear" and isinstance(registry.emitted[-1][1]["show_seq"], int)
     bad = await tools["atlas_show"].ainvoke({"element": "nope"})
     assert bad.startswith("Can't show that: unknown element 'nope'")
+
+
+def test_steps_on_a_parallel_view_follow_the_badges():
+    # fleet_delegation-like: a parallel pair at 2–3; the agent's step N is badge N (what the
+    # operator sees on the diagram and in the counter), so the last step is 4, not 3
+    v = {
+        "id": "p",
+        "_type": "dynamic",
+        "nodes": [{"id": i} for i in ("op", "hub", "a", "b")],
+        "edges": [
+            {"id": "step-01", "source": "op", "target": "hub", "label": "asks"},
+            {"id": "step-02:par.01", "source": "hub", "target": "a", "label": "to a"},
+            {"id": "step-02:par.02", "source": "hub", "target": "b", "label": "to b"},
+            {"id": "step-03", "source": "hub", "target": "op", "label": "answer"},
+        ],
+    }
+    model = {"views": {"p": v}, "elements": {}}
+    assert N.resolve_step(model, "p", 4, None) == (4, "")
+    assert N.resolve_step(model, "p", "last", None) == (4, "")
+    n, why = N.resolve_step(model, "p", 5, None)
+    assert n is None and "out of range (1–4)" in why
+    assert [line.split(": ")[-1] for line in N.step_lines(model, v)] == ["asks", "to a", "to b", "answer"]
