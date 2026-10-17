@@ -5,7 +5,7 @@
 import type { LikeC4Model } from '@likec4/core/model'
 import { memo, useEffect, useRef, useState } from 'react'
 import { applyHighlight, clearHighlight, type Highlight } from './highlight'
-import { calloutPlacement, mdLight } from './logic.mjs'
+import { calloutPlacement, mdLight, stepEdgeId, stepIndex, stepSubject } from './logic.mjs'
 import { Button } from '@protolabsai/ui/primitives'
 import { Stage, type StageHandle } from './Stage'
 
@@ -37,7 +37,6 @@ type Props = {
   onCodeRefClick?: (e: React.MouseEvent | React.KeyboardEvent) => void
 }
 
-const stepId = (n: number) => `step-${String(n).padStart(2, '0')}` as any
 const LAYER_PROPS = {
   controls: false,
   showNavigationButtons: false,
@@ -78,7 +77,12 @@ function ExplorerImpl({ model, data, viewId, scheme, themeCss, cmd, onNavigate, 
       if (!d) return
       const ctx = d.getContext() as any
       const st = cmd.step
+      const view = data?.views?.[cmd.view]
+      // the step's participants (every edge of a parallel step): LikeC4's walkthrough camera and a
+      // resize refit are re-aimed at them, framed whole and legible (Stage.aim)
+      const aimAt = (n: number | null) => s.aim(n != null ? stepSubject(view, n) : null)
       if (cmd.clear) {
+        if (!ctx.activeWalkthrough) s.aim(null)
         clearHighlight(d)
         return
       }
@@ -89,7 +93,8 @@ function ExplorerImpl({ model, data, viewId, scheme, themeCss, cmd, onNavigate, 
       }
       if (cmd.highlight && typeof st === 'number') {
         // walk to the step first; light the highlight over it once the walkthrough camera settles
-        const id = stepId(st)
+        const id = (stepEdgeId(view, st) ?? undefined) as any
+        aimAt(st)
         if (ctx.activeWalkthrough) d.walkthroughStep({ step: id })
         else d.startWalkthrough(id)
         setTimeout(() => {
@@ -100,24 +105,34 @@ function ExplorerImpl({ model, data, viewId, scheme, themeCss, cmd, onNavigate, 
         return
       }
       if (st === 'stop') {
+        s.aim(null)
         d.stopWalkthrough()
         d.fitDiagram(450)
       } else if (st === 'next' || st === 'prev') d.walkthroughStep(st)
       else if (st === 'start' || typeof st === 'number') {
-        const id = typeof st === 'number' ? stepId(st) : undefined
+        const id = (typeof st === 'number' ? (stepEdgeId(view, st) ?? undefined) : undefined) as any
+        aimAt(typeof st === 'number' ? st : 1)
         if (ctx.activeWalkthrough && id) d.walkthroughStep({ step: id })
         else d.startWalkthrough(id)
       } else if (cmd.focus) {
+        s.aim(null)
         if (ctx.activeWalkthrough) d.stopWalkthrough()
         d.focusNode(cmd.focus as any)
       } else if (cmd.fit) {
+        s.aim(null)
         if (ctx.activeWalkthrough) d.stopWalkthrough()
         d.send({ type: 'key.esc' } as any)
         d.fitDiagram(450)
       }
       setTimeout(() => {
         const w = (d.getContext() as any).activeWalkthrough
-        onWalk(w ? Number(String(w.stepId ?? '').replace(/^step-0*/, '')) || 1 : null)
+        const n = w ? (stepIndex(view, w.stepId) ?? 1) : null
+        if (st === 'next' || st === 'prev') {
+          // LikeC4 picked the edge: aim at its step and re-frame (supersedes its own move)
+          aimAt(n)
+          if (n != null) s.frame(500) // LikeC4's walkthrough duration; slowed like its own moves (motion.patchCamera)
+        }
+        onWalk(n)
       }, 80)
     }
     void run()

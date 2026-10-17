@@ -133,12 +133,24 @@ def test_tour_rules(base, tmp_path):
     assert not any("slide 1:" in m for m in msgs)
 
 
-def test_steps_count_parallel_substeps_once():
+def test_steps_number_like_the_badges_each_parallel_branch_is_a_step():
+    # LikeC4 badges every step edge in walk order (a parallel pair is 2 and 3), and the viewer's
+    # counter, the presenter and atlas_show(step=) all count the same way
     v = {
         "_type": "dynamic",
-        "edges": [{"id": "step-01"}, {"id": "step-02.01"}, {"id": "step-02.02"}, {"id": "step-03"}],
+        "edges": [
+            {"id": "step-03", "target": "d"},
+            {"id": "step-02:par.02", "target": "c"},
+            {"id": "step-01", "target": "a"},
+            {"id": "step-02:par.01", "target": "b"},
+            {"id": "plain", "target": "x"},
+        ],
     }
-    assert L.steps_of(v) == [1, 2, 3]
+    assert L.steps_of(v) == [1, 2, 3, 4]
+    assert [L.step_edge(v, n).get("target") for n in (1, 2, 3, 4)] == ["a", "b", "c", "d"]
+    assert L.step_edge(v, 5) == {} and L.step_edge(v, 0) == {}
+    # older LikeC4 sub-step ids sort the same way
+    assert L.steps_of({"edges": [{"id": "step-01"}, {"id": "step-02.01"}, {"id": "step-02.02"}]}) == [1, 2, 3]
 
 
 def test_auto_tour_order(base):

@@ -119,7 +119,7 @@ to open the Atlas view. Returns a one-line confirmation, or why it can't.
 | `relations` | `[[from, to], …]` — highlight the edges between each pair: every direct edge, else the shortest directed path, else the shortest undirected one. Both ends are highlighted. |
 | `note` | A callout pinned to the first highlighted node. Markdown-light, at most **280** characters. It needs something highlighted; with a flow `step` and nothing else, it anchors to that step's target node. |
 | `view` | A view id (from `atlas_describe`). |
-| `step` | A flow step: a number (1-based), or `"next"`, `"prev"` / `"previous"`, `"first"`, `"last"` — relative to the operator's current step. With no `view`, uses the operator's current flow. |
+| `step` | A flow step: a number (1-based, **the number on the step's badge in the diagram**; each branch of a `parallel` block is a step of its own), or `"next"`, `"prev"` / `"previous"`, `"first"`, `"last"` — relative to the operator's current step. With no `view`, uses the operator's current flow. |
 | `tour`, `slide` | A tour id (`"auto"` always exists) and a 1-based slide. With only these, opens the tour there. |
 | `present` | Open presenter mode. |
 | `caption` | One plain sentence of narration (≤ 280 characters) in a caption bar **under** the diagram, so it never covers a node. It stays up across shows until a new caption replaces it; `""` or `atlas_clear` removes it. Absent leaves the bar as it is. |
@@ -285,7 +285,7 @@ Emitted by `atlas_show`, already resolved and validated:
 |---|---|---|
 | `present` | bool | Always present. Open presenter mode. |
 | `view` | string | The view to show. |
-| `step` | int | A flow step (1-based). |
+| `step` | int | A flow step (1-based, badge order). In explore, the camera frames that step's participants (a parallel step: the whole block), whole and legible, and keeps them framed when the canvas resizes. |
 | `focus` | string[] | **Node ids in `view`** to highlight (an element is mapped onto its nearest shown ancestor). |
 | `edges` | string[] | Edge ids in `view` to highlight. |
 | `note` | string | The callout, ≤ 280 characters. |

@@ -2,6 +2,23 @@
 
 All notable changes to Atlas. Versions follow `version` in `protoagent.plugin.yaml`.
 
+## [0.2.6]
+
+### Fixed
+
+- **A walkthrough step frames its participants, and stays framed.** In explore, every step the camera walks
+  to (from `atlas_show(step=…)`, the step buttons or a deep link) now frames that step's nodes, and for a
+  step in a `parallel` block, the whole block. The frame keeps them whole and legible in the safe rect, with
+  no node cut at the edge, as present mode does. The camera moves between steps as one slow eased flight.
+  Before, any canvas resize mid-walkthrough (the caption bar wrapping to a second line, say) made LikeC4
+  refit the **whole** view, so the step's nodes shrank to unreadable.
+- **Step numbers match the diagram's badges everywhere.** LikeC4 badges each branch of a parallel block as a
+  step of its own (`step-07:par.01` is 7, `step-07:par.02` is 8). The backend counted a parallel block
+  once, so on such a view `atlas_show(step=N)` lit badge N+1, the last badge was refused as out of range,
+  and the counter read "14 / 15" over step 15. The backend (`atlas_show`, `atlas_describe`, tour lint,
+  record timing), the counter and walking to a step now all count by badge. Walking to a parallel step
+  no longer silently does nothing.
+
 ## [0.2.5]
 
 ### Added

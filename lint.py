@@ -88,15 +88,25 @@ def drilldowns(model: dict | None) -> dict[str, str]:
     return out
 
 
+def step_edges(view: dict) -> list[dict]:
+    """A dynamic view's walkthrough edges (``step-NN``, parallel branches ``step-07:par.01`` /
+    ``step-07.01``) in walk order."""
+    return sorted(
+        (e for e in view.get("edges") or [] if _STEP_ID.match(str(e.get("id", "")))), key=lambda e: str(e["id"])
+    )
+
+
 def steps_of(view: dict) -> list[int]:
-    """The 1-based walkthrough steps of a dynamic view (``step-NN`` edges; parallel sub-steps
-    ``step-03.01`` belong to step 3)."""
-    nums = set()
-    for e in view.get("edges") or []:
-        m = _STEP_ID.match(str(e.get("id", "")))
-        if m:
-            nums.add(int(m.group(1)))
-    return sorted(nums)
+    """The 1-based walkthrough steps of a dynamic view, numbered the way LikeC4 badges them and the
+    viewer walks them: one per step edge, so each branch of a parallel block is a step of its own
+    (``step-07:par.01`` is 7, ``step-07:par.02`` is 8, the next ``step-08`` is 9)."""
+    return list(range(1, len(step_edges(view)) + 1))
+
+
+def step_edge(view: dict, n: int) -> dict:
+    """Step ``n``'s edge (1-based, badge order), or ``{}``."""
+    edges = step_edges(view)
+    return edges[n - 1] if isinstance(n, int) and 0 < n <= len(edges) else {}
 
 
 def tree_order(model: dict | None) -> list[str]:

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import {
   keyOwner, presenterOwns,
   autoTour, toursFor, cleanTours, tourArray, normaliseLink, normaliseLinks, resolveProject, codeOpenMessage,
-  presenterKey, cycle, slideForView, parseShow, parentView, viewChain, searchModel, viewForElement,
+  presenterKey, cycle, slideForView, parseShow, dynamicSteps, stepIndex, stepEdgeId, stepSubject, parentView, viewChain, searchModel, viewForElement,
   keepView, viewOptions, mdLight, schemeForRgb, interpolateZoom, fitBox, errorFileRel, elementOrder, safeRelPath,
 } from '../src/logic.mjs'
 
@@ -285,4 +285,31 @@ test('interpolateZoom exposes its van Wijk length S (a level’s share of a dive
   const z = interpolateZoom(1.0)([0, 0, 1000], [0, 0, 250])
   assert.ok(Math.abs(z.S - Math.log(4)) < 1e-9) // pure zoom: |ln(w1 / w0)| / rho
   assert.ok(interpolateZoom(1.0)([0, 0, 1000], [500, 0, 250]).S > z.S)
+})
+
+test('steps count the way LikeC4 badges them: each parallel branch is a step (counter, walk id, camera)', () => {
+  const v = {
+    _type: 'dynamic',
+    edges: [
+      { id: 'step-04', source: 'hub', target: 'op' },
+      { id: 'step-01', source: 'op', target: 'hub' },
+      { id: 'step-03:par.02', source: 'a2a', target: 'proxy' },
+      { id: 'step-02', source: 'hub', target: 'del' },
+      { id: 'step-03:par.01', source: 'a2a', target: 'local' },
+      { id: 'plain', source: 'x', target: 'y' },
+    ],
+  }
+  // badges 1..5: the parallel pair is 3 and 4, the last step (hub → op) is 5 — the counter reads "n / 5"
+  assert.deepEqual(dynamicSteps(v).map((e) => e.id), ['step-01', 'step-02', 'step-03:par.01', 'step-03:par.02', 'step-04'])
+  assert.deepEqual([1, 3, 4, 5].map((n) => stepEdgeId(v, n)), ['step-01', 'step-03:par.01', 'step-03:par.02', 'step-04'])
+  assert.equal(stepEdgeId(v, 6), null)
+  // the counter's numerator for the active walkthrough edge is that same badge number
+  assert.deepEqual(['step-03:par.02', 'step-04', 'nope'].map((id) => stepIndex(v, id)), [4, 5, null])
+  // the camera frames a parallel step's whole block (both branches); a plain step, its two ends
+  assert.deepEqual(stepSubject(v, 3), ['a2a', 'local', 'proxy'])
+  assert.deepEqual(stepSubject(v, 4), ['a2a', 'local', 'proxy'])
+  assert.deepEqual(stepSubject(v, 5), ['hub', 'op'])
+  assert.deepEqual(stepSubject(v, 9), [])
+  // the older LikeC4 sub-step ids (`step-02.01`) group the same way
+  assert.deepEqual(stepSubject({ edges: [{ id: 'step-02.01', source: 'a', target: 'b' }, { id: 'step-02.02', source: 'a', target: 'c' }] }, 2), ['a', 'b', 'c'])
 })

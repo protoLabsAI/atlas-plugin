@@ -79,6 +79,29 @@ export function dynamicSteps(view) {
   return (view?.edges ?? []).filter((e) => /^step-\d+/.test(e.id)).sort((a, b) => a.id.localeCompare(b.id))
 }
 
+/** The 1-based step a walkthrough edge id is — its position in walk order, the number LikeC4 draws
+ *  on its badge (a parallel block's edges are steps of their own: `step-07:par.01` is 7,
+ *  `step-07:par.02` is 8) — else null. Tours, the presenter and the backend count the same way. */
+export function stepIndex(view, id) {
+  const i = dynamicSteps(view).findIndex((e) => e.id === id)
+  return i >= 0 ? i + 1 : null
+}
+
+/** The LikeC4 walkthrough id of step `n` (1-based, badge order). */
+export function stepEdgeId(view, n) {
+  return dynamicSteps(view)[n - 1]?.id ?? null
+}
+
+/** The node ids step `n` involves — the camera's subject: its edge's two ends, and for a step in a
+ *  parallel block, every branch of that block (the fan-out is framed whole). */
+export function stepSubject(view, n) {
+  const e = dynamicSteps(view)[n - 1]
+  if (!e) return []
+  const block = /^(step-\d+)[:.]/.exec(e.id)?.[1]
+  const group = block ? dynamicSteps(view).filter((x) => x.id.startsWith(block + ':') || x.id.startsWith(block + '.')) : [e]
+  return [...new Set(group.flatMap((x) => [x.source, x.target]))]
+}
+
 const edgeLabel = (e) => (e?.label ?? e?.labelBBox?.text ?? '').toString().trim()
 
 /** A step's own notes (LikeC4 `notes` on a dynamic step: a string, or {txt} / {md}), or '' */
