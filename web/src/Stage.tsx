@@ -657,6 +657,9 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
   // an edge label's will-change:transform freezes its raster at the scale it was first painted
   // at → blurry after any zoom; let it re-raster with the viewport
   const crispCss = '.likec4-edge-label-container{will-change:auto !important}'
+  // no React Flow corner badge: it lands in every recording (xyflow is MIT, credited in
+  // THIRD_PARTY_NOTICES.md)
+  const chromeCss = '.react-flow__attribution{display:none !important}'
 
   const fontVar = { '--likec4-app-font': 'var(--pl-font-sans)' } as any
   return (
@@ -739,7 +742,7 @@ export const Stage = forwardRef<StageHandle, Props>(function Stage(
                 firstReady.current.resolve()
               }}
             >
-              <style>{themeCss + '\n' + crispCss + (legible ? '\n' + legibleCssFor(l.key) : '')}</style>
+              <style>{themeCss + '\n' + crispCss + '\n' + chromeCss + (legible ? '\n' + legibleCssFor(l.key) : '')}</style>
             </ReactLikeC4>
           </div>
         ))}

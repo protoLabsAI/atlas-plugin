@@ -2,6 +2,14 @@
 
 All notable changes to Atlas. Versions follow `version` in `protoagent.plugin.yaml`.
 
+## [0.2.7]
+
+### Fixed
+
+- **No React Flow badge in the corner of the diagram.** The small "React Flow" link sat at the bottom right
+  of every view and showed up in every recording. The viewer now hides it. React Flow (`@xyflow/react`, MIT)
+  is still credited in `THIRD_PARTY_NOTICES.md`.
+
 ## [0.2.6]
 
 ### Fixed
