@@ -85,3 +85,9 @@ def test_tool_docstrings_are_plain_literals(registry):
 
     for t in build_tools(object(), registry):
         assert t.description and len(t.description) > 40, t.name
+
+
+def test_built_viewer_hides_the_react_flow_badge():
+    # the corner badge would land in every recording; the shipped bundle must carry the rule
+    bundles = list((ROOT / "static" / "assets").glob("atlas-*.js"))
+    assert bundles and any(".react-flow__attribution{display:none !important}" in b.read_text() for b in bundles)
