@@ -476,8 +476,19 @@ def plan_view_show(
         note = str(note).strip()
         if len(note) > NOTE_MAX:
             return None, f"note is {len(note)} characters — keep it to {NOTE_MAX} (one or two sentences)"
+        if not hl and "step" in event:
+            # A walkthrough step already names its edge (from → to): anchor the note to the step's
+            # target node, the way the walkthrough's own captions read (#14).
+            e = next(
+                (e for e in v.get("edges") or [] if str(e.get("id", "")).startswith(f"step-{event['step']:02d}")),
+                None,
+            )
+            target = str((e or {}).get("target") or "")
+            if target and target in node_ids(v):
+                hl = [target]
+                event["focus"] = hl
         if not hl:
-            return None, "a note needs something to anchor to — give element/focus/relations"
+            return None, "a note needs something to anchor to — give element/focus/relations (or a step)"
         event["note"] = note
     return event, ""
 

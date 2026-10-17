@@ -159,6 +159,9 @@ test('cycle + slideForView', () => {
 
 test('parseShow (atlas.show bus payloads)', () => {
   const tours = toursFor(null, data)
+  assert.equal(parseShow({ view: 'turn', step: 2, caption: '  The API hands off.  ' }, data, tours).caption, 'The API hands off.')
+  assert.equal(parseShow({ view: 'turn', caption: '' }, data, tours).caption, '')
+  assert.ok(!('caption' in parseShow({ view: 'turn' }, data, tours)))
   assert.deepEqual(parseShow({ view: 'turn', step: 2 }, data, tours), { kind: 'view', view: 'turn', step: 2, focus: [], edges: [], note: undefined, present: false })
   assert.deepEqual(parseShow({ view: 'index', focus: 'app', present: true }, data, tours), { kind: 'view', view: 'index', step: undefined, focus: ['app'], edges: [], note: undefined, present: true })
   // live navigation: many foci, edges, a callout; unknown ids dropped; a note needs an anchor

@@ -462,7 +462,9 @@ export function parseShow(d, data, tours) {
   const eids = new Set((v.edges ?? []).map((e) => e.id))
   const edges = (Array.isArray(d.edges) ? d.edges : []).filter((e) => typeof e === 'string' && eids.has(e))
   const note = typeof d.note === 'string' && d.note.trim() && (focus.length || edges.length) ? d.note.trim().slice(0, 280) : undefined
-  return { kind: 'view', view: d.view, step, focus, edges, note, present }
+  // narration for the caption bar under the diagram: a string sets it ("" clears it), absent leaves it
+  const caption = typeof d.caption === 'string' ? d.caption.trim().slice(0, 280) : undefined
+  return { kind: 'view', view: d.view, step, focus, edges, note, present, ...(caption !== undefined ? { caption } : {}) }
 }
 
 // ---------------------------------------------------------------- live highlights

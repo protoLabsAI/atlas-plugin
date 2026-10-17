@@ -146,7 +146,11 @@ border: 1px solid var(--a-accent); transform: rotate(45deg) }
 @media (prefers-reduced-motion: reduce) { .notes { transition: none } }
 .details .pl-panel-header__kicker .linkish { text-transform: none; letter-spacing: 0 }
 .callout[hidden] { display: none }
-.notes-measure { position: absolute; inset: 0; visibility: hidden; pointer-events: none; z-index: -1 }</style>
+.notes-measure { position: absolute; inset: 0; visibility: hidden; pointer-events: none; z-index: -1 }
+.caption-bar { flex: 0 0 auto; display: flex; align-items: center; min-height: 3.6em; padding: var(--pl-space-3) var(--pl-space-6); background: var(--pl-color-bg-raised); border-top: var(--pl-border-width) solid var(--pl-color-border, rgba(127, 127, 127, 0.25)) }
+.caption-text { margin: 0; padding-left: var(--pl-space-4); border-left: 3px solid var(--pl-color-accent, currentColor); font-size: clamp(20px, 2.4vw, 30px); line-height: 1.35; font-weight: var(--pl-font-weight-medium); color: var(--pl-color-fg); max-width: 62ch; animation: caption-in var(--caption-fade, 400ms) ease both }
+@keyframes caption-in { from { opacity: 0; transform: translateY(4px) } to { opacity: 1; transform: none } }
+@media (prefers-reduced-motion: reduce) { .caption-text { animation: none } }</style>
 <script>
   // RULE 3 - slug-aware base: "" on the host window, "/agents/<slug>" through the fleet proxy.
   var BASE = location.pathname.split("/plugins/")[0];
@@ -159,7 +163,7 @@ border: 1px solid var(--a-accent); transform: rotate(45deg) }
     document.head.insertBefore(l, document.getElementById("atlas-css"));
     // The viewer bundle, BASE-prefixed (the page URL has no trailing slash, so no relative URLs).
     var s = document.createElement("script");
-    s.type = "module"; s.src = BASE + "/plugins/atlas/static/assets/atlas-BVnq0gVn.js";
+    s.type = "module"; s.src = BASE + "/plugins/atlas/static/assets/atlas-o53zqfDI.js";
     s.onerror = function () {
       var b = document.getElementById("boot");
       if (b) b.textContent = "Atlas could not load its viewer bundle (" + s.src + ").";

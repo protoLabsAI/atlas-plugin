@@ -170,3 +170,10 @@ code.coderef:hover { text-decoration-color: var(--a-accent) }
 .callout[hidden] { display: none }
 /* hidden clones of every caption (measured for framing) — same box as the live panel */
 .notes-measure { position: absolute; inset: 0; visibility: hidden; pointer-events: none; z-index: -1 }
+
+/* live narration (atlas_show caption=…): a bar UNDER the diagram — it takes its own row, so it never
+   covers a node; same type scale as record-mode captions (never smaller) */
+.caption-bar { flex: 0 0 auto; display: flex; align-items: center; min-height: 3.6em; padding: var(--pl-space-3) var(--pl-space-6); background: var(--pl-color-bg-raised); border-top: var(--pl-border-width) solid var(--pl-color-border, rgba(127, 127, 127, 0.25)) }
+.caption-text { margin: 0; padding-left: var(--pl-space-4); border-left: 3px solid var(--pl-color-accent, currentColor); font-size: clamp(20px, 2.4vw, 30px); line-height: 1.35; font-weight: var(--pl-font-weight-medium); color: var(--pl-color-fg); max-width: 62ch; animation: caption-in var(--caption-fade, 400ms) ease both }
+@keyframes caption-in { from { opacity: 0; transform: translateY(4px) } to { opacity: 1; transform: none } }
+@media (prefers-reduced-motion: reduce) { .caption-text { animation: none } }

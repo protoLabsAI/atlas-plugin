@@ -187,6 +187,26 @@ def test_note_rules(stub):
     assert "needs something to anchor" in why
 
 
+def test_a_note_on_a_step_anchors_to_the_steps_target(stub):
+    # #14: a dynamic-view step names its edge, so a bare note anchors to the step's target node
+    ev, why = show_target(stub, view="turn", step=2, note="The API hands the turn to the graph.")
+    assert why == "" and ev["focus"] == ["app.graph"] and ev["note"].startswith("The API")
+    # an explicit focus still wins
+    ev, _ = show_target(stub, view="turn", step=2, focus="app.api", note="x")
+    assert ev["focus"] == ["app.api"]
+
+
+def test_caption_rides_on_any_show(stub):
+    ev, why = show_target(stub, view="turn", step=1, caption="  The operator sends a message.  ")
+    assert why == "" and ev["caption"] == "The operator sends a message."
+    ev, _ = show_target(stub, element="gw", caption="")
+    assert ev["caption"] == ""  # "" clears the bar
+    ev, _ = show_target(stub, view="turn", step=1)
+    assert "caption" not in ev  # absent leaves the bar as it is
+    _, why = show_target(stub, view="turn", caption="x" * 300)
+    assert "caption is 300 characters" in why
+
+
 def test_unknown_view_suggests(stub):
     _, why = show_target(stub, view="app_detial")
     assert "unknown view 'app_detial'" in why and "Did you mean: app_detail" in why
