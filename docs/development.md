@@ -181,8 +181,8 @@ cd web && npm ci && npm test
 
 [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs on every PR and push to `main`:
 Python 3.12 and Node 22, `ruff check` + `ruff format --check`, `pytest -q`, and
-`node vendor/atlas-engine.mjs validate examples/protoagent` must report `ok`. Same-repo runs use
-the org's Namespace runner (`vars.NSC_RUNNER`); PRs from forks run on `ubuntu-latest`. The web
+`node vendor/atlas-engine.mjs validate examples/protoagent` must report `ok`. It runs on a
+GitHub-hosted `ubuntu-latest` runner. The web
 unit tests aren't in CI — run `npm test` before you push.
 
 ### Release ritual
